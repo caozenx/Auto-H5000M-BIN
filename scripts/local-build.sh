@@ -34,13 +34,26 @@ ADGUARDHOME_I18N_IPK_URL="${ADGUARDHOME_I18N_IPK_URL:-https://github.com/sirpdbo
 
 ENABLE_ADGUARDHOME="${ENABLE_ADGUARDHOME:-false}"
 ENABLE_OPENCLASH="${ENABLE_OPENCLASH:-false}"
-ENABLE_NIKKI="${ENABLE_NIKKI:-true}"
+ENABLE_NIKKI="${ENABLE_NIKKI:-false}"
 ENABLE_UPNP="${ENABLE_UPNP:-true}"
-ENABLE_VLMCSD="${ENABLE_VLMCSD:-true}"
+ENABLE_VLMCSD="${ENABLE_VLMCSD:-false}"
 ENABLE_MOSDNS="${ENABLE_MOSDNS:-true}"
 ENABLE_DOCKERMAN="${ENABLE_DOCKERMAN:-false}"
 ENABLE_HOMEPROXY="${ENABLE_HOMEPROXY:-false}"
 ENABLE_ADBLOCK="${ENABLE_ADBLOCK:-true}"
+
+# WED (Wireless Ethernet Dispatch): MediaTek NETSYS hardware path that moves
+# Ethernet <-> Wi-Fi packet forwarding off the CPU. true = upstream default
+# (best Wi-Fi throughput, lowest CPU); false = CPU handles Wi-Fi forwarding
+# (lower throughput, simpler data path, useful for A/B testing Wi-Fi bugs).
+# Applied in apply_wed_setting() AFTER enable_h5000m_wifi_driver_config so the
+# driver block cannot silently re-enable it, and checked after defconfig.
+ENABLE_WED="${ENABLE_WED:-true}"
+
+# Default LAN address written into package/base-files/files/bin/config_generate.
+# Only affects a fresh flash / factory reset; sysupgrade with "keep settings"
+# keeps the existing /etc/config/network. Upstream default is 192.168.6.1.
+LAN_IP="${LAN_IP:-192.168.100.1}"
 
 # Modem stack selection — QModem and the original luci-app-modem are
 # MUTUALLY EXCLUSIVE because both wire up the same physical QMI/USB/PCIe
@@ -90,6 +103,7 @@ Options:
 
 Feature switches are controlled by environment variables, for example:
   ENABLE_MOSDNS=false ENABLE_ORIGINAL_MODEM=true ENABLE_ADBLOCK=true THREADS=8 scripts/local-build.sh
+  ENABLE_WED=false LAN_IP=192.168.1.1 scripts/local-build.sh
 
 Default feature switches match the scheduled GitHub Actions build.
 EOF
@@ -370,6 +384,13 @@ Original Modem=${ENABLE_ORIGINAL_MODEM}
 QModem=${ENABLE_QMODEM}
 QModem-Next=${ENABLE_QMODEM_NEXT}
 QModem-Lua=${ENABLE_QMODEM_LUA}
+WED=${ENABLE_WED}
+LAN_IP=${LAN_IP}
+GOPROXY=${GOPROXY}
+GOSUMDB=${GOSUMDB}
+DOWNLOAD_MIRROR=${DOWNLOAD_MIRROR}
+EOF
+}
 
 # ENFORCEMENT: QModem and the original luci-app-modem cannot ship together
 # (see comment on ENABLE_ORIGINAL_MODEM). Resolve the conflict here before
@@ -395,11 +416,6 @@ resolve_modem_stack() {
     fi
   fi
   export ENABLE_ORIGINAL_MODEM ENABLE_QMODEM_NEXT ENABLE_QMODEM_LUA
-}
-GOPROXY=${GOPROXY}
-GOSUMDB=${GOSUMDB}
-DOWNLOAD_MIRROR=${DOWNLOAD_MIRROR}
-EOF
 }
 
 prepare_source() {
@@ -649,6 +665,23 @@ patch_mtwifi_apcli_bssid_budget() {
 # destined to a local address is never offloaded and instead follows the normal
 # INPUT path. Forwarded LAN<->WAN traffic is unaffected because its destination
 # is not RTN_LOCAL.
+# Default LAN address for a fresh flash / factory reset. Upstream hardcodes it
+# in config_generate as `lan) ipad=${ipaddr:-"192.168.6.1"} ;;`. Kept settings
+# from sysupgrade are not touched (config_generate only runs without a config).
+set_default_lan_ip() {
+  local f="package/base-files/files/bin/config_generate"
+  local octet
+  [[ "$LAN_IP" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || die "Invalid LAN_IP: $LAN_IP"
+  for octet in ${LAN_IP//./ }; do
+    [ "$octet" -le 255 ] || die "Invalid LAN_IP: $LAN_IP"
+  done
+  [ -f "$f" ] || die "$f not found; cannot set default LAN IP"
+  log "Setting default LAN IP to $LAN_IP"
+  sed -i -E 's|(lan\) ipad=\$\{ipaddr:-")[0-9.]+("\})|\1'"${LAN_IP}"'\2|' "$f"
+  grep -qF "lan) ipad=\${ipaddr:-\"${LAN_IP}\"}" "$f" || \
+    die "Default LAN IP patch verification failed ($f)"
+}
+
 patch_mtk_hnat_local_dest() {
   local patch_file="$ROOT_DIR/patches/mtk-hnat-local-dest.patch"
   local source_file="target/linux/mediatek/files-6.6/drivers/net/ethernet/mediatek/mtk_hnat/hnat_nf_hook.c"
@@ -1049,6 +1082,7 @@ apply_package_fixes() {
   patch_mtwifi_apcli_bssid_budget
   verify_mtwifi_patch
   patch_mtk_hnat_local_dest
+  set_default_lan_ip
   patch_mtwifi7_sta_mgmt_assoc_hostapd_guard
   ensure_external_luci_i18n_packages
   if is_true "$ENABLE_QMODEM"; then
@@ -1600,23 +1634,29 @@ enable_modem_stack_config() {
     if is_true "$ENABLE_QMODEM_LUA"; then
       config_enable PACKAGE_ndisc6
     fi
-    # ModemManager + libqmi + libmbim are required by QModem's mbim/qmi
-    # helpers. dbus + glib2 are hard ModemManager build dependencies.
-    config_enable PACKAGE_dbus
-    config_enable PACKAGE_libdbus
-    config_enable PACKAGE_glib2
+    # QModem dials with its own tools (quectel-CM-5G-M / tom_modem / AT via
+    # ubus-at-daemon); FUjr/QModem's qmodem Makefile does NOT depend on
+    # ModemManager. ModemManager is a second, independent modem manager that
+    # probes and holds the same /dev/cdc-wdm* and AT ports, so it must not be
+    # installed next to QModem. Keep only the standalone QMI/MBIM CLI tools.
     config_enable PACKAGE_jansson
     config_enable PACKAGE_libqmi
     config_enable PACKAGE_libmbim
     config_enable PACKAGE_qmi-utils
-    config_enable PACKAGE_modemmanager
-    config_enable PACKAGE_modemmanager-rpcd
-    config_enable PACKAGE_luci-proto-modemmanager
     # uqmi is the legacy userspace QMI tool used by QModem's netifd procd
-    # helper scripts even when ModemManager is the primary controller.
+    # helper scripts.
     config_enable PACKAGE_uqmi
     # QModem 推荐：Tom 定制版拨号工具 quectel-CM-5G-M（包含在 QModem 仓库）
     config_enable PACKAGE_quectel-CM-5G-M
+  fi
+
+  # ModemManager belongs to the original-modem stack only. With QModem it
+  # would fight for the same modem ports, so switch it off explicitly
+  # (verified after defconfig and in the image manifest).
+  if ! is_true "$ENABLE_ORIGINAL_MODEM"; then
+    config_disable PACKAGE_modemmanager
+    config_disable PACKAGE_modemmanager-rpcd
+    config_disable PACKAGE_luci-proto-modemmanager
   fi
 }
 
@@ -1952,22 +1992,11 @@ CONFIG_PACKAGE_luci-app-mtwifi-cfg=y
 CONFIG_PACKAGE_wireless-regdb=y
 EOF
 
-  # Respect WED setting from h5000m.extra.config: if user commented out
-  # CONFIG_PACKAGE_kmod-mtk_wed (i.e. "is not set"), also disable the kernel
-  # CONFIG_MTK_HWIFI_WED_SUPPORT to avoid compilation mismatches. Disabling WED
-  # via kmod-mtk_wed alone leaves CONFIG_MTK_HWIFI_WED_SUPPORT=y in .config,
-  # which can cause build warnings or runtime inconsistencies.
-  if grep -q '^# CONFIG_PACKAGE_kmod-mtk_wed is not set$' "$ROOT_DIR/h5000m.extra.config" 2>/dev/null || \
-     grep -q '^CONFIG_PACKAGE_kmod-mtk_wed is not set$' "$ROOT_DIR/h5000m.extra.config" 2>/dev/null; then
-    log "WED disabled via h5000m.extra.config; disabling WED support in .config"
-    # Remove the WED package and kernel support; upstream base.config may have
-    # CONFIG_MTK_HWIFI_WED_SUPPORT=y, so we override it to is-not-set.
-    sed -i '/^CONFIG_PACKAGE_kmod-mtk_wed=y$/d' .config
-    grep -v '^CONFIG_MTK_HWIFI_WED_SUPPORT=y$' .config > .config.tmp && mv .config.tmp .config
-    echo '# CONFIG_MTK_HWIFI_WED_SUPPORT is not set' >> .config
-  else
-    echo "CONFIG_PACKAGE_kmod-mtk_wed=y" >> .config
-  fi
+  # WED is decided by ENABLE_WED only. It is applied here and again right
+  # after enable_h5000m_wifi_driver_config (which force-enables WED), so the
+  # final .config always follows ENABLE_WED. Previously this was keyed off a
+  # commented line in h5000m.extra.config and was silently re-enabled later.
+  apply_wed_setting
 
   local disabled_pkgs=("luci-app-sms-tool-lite" "luci-app-3ginfo-lite")
 
@@ -2069,6 +2098,7 @@ EOF
   fi
   if ! is_true "$ENABLE_ORIGINAL_MODEM"; then
     disabled_pkgs+=("luci-app-modem" "luci-i18n-modem-zh-cn" "luci-i18n-modem-en")
+    disabled_pkgs+=("modemmanager" "modemmanager-rpcd" "luci-proto-modemmanager")
     # When QModem is on, also disable the immortalwrt feeds QMI vendor
     # drivers that conflict with QModem's driver/{quectel,fibocom}_QMI_WWAN.
     disabled_pkgs+=("quectel-qmi-wwan" "fibocom-qmi-wwan")
@@ -2094,6 +2124,7 @@ EOF
 
   config_enable PACKAGE_luci-i18n-mtwifi-cfg-zh-cn
   enable_h5000m_wifi_driver_config
+  apply_wed_setting
 
   if is_true "$ENABLE_MOSDNS"; then
     config_enable PACKAGE_luci-app-mosdns
@@ -2179,9 +2210,11 @@ EOF
     if is_true "$ENABLE_QMODEM"; then
       verify_enabled_pkg "QModem Quectel driver" "kmod-qmi_wwan_q" true
       verify_enabled_pkg "QModem Fibocom driver" "kmod-qmi_wwan_f" true
-      verify_enabled_pkg "QModem ModemManager" "modemmanager" true
-      verify_enabled_pkg "QModem dbus" "dbus" true
     fi
+  fi
+  if ! is_true "$ENABLE_ORIGINAL_MODEM"; then
+    verify_disabled_pkg "ModemManager (conflicts with QModem)" "modemmanager"
+    verify_disabled_pkg "luci-proto-modemmanager (conflicts with QModem)" "luci-proto-modemmanager"
   fi
   # QModem (FUjr) verification — frontend depends on ENABLE_QMODEM_NEXT vs LUA
   verify_enabled_pkg "QModem core" "qmodem" "$ENABLE_QMODEM"
@@ -2226,7 +2259,13 @@ EOF
   # MTK HWIFI core configuration verification
   verify_config_symbol "H5000M HWIFI PCI support" "CONFIG_MTK_HWIFI_PCI_SUPPORT=y"
   verify_config_symbol "H5000M HWIFI CONNAC interface" "CONFIG_MTK_HWIFI_CONNAC_IF_SUPPORT=y"
-  verify_config_symbol "H5000M HWIFI WED support" "CONFIG_MTK_HWIFI_WED_SUPPORT=y"
+  if is_true "$ENABLE_WED"; then
+    verify_config_symbol "H5000M HWIFI WED support" "CONFIG_MTK_HWIFI_WED_SUPPORT=y"
+    verify_enabled_pkg "H5000M MTK WED driver" "kmod-mtk_wed" true
+  else
+    verify_disabled_symbol "H5000M HWIFI WED support (ENABLE_WED=false)" "MTK_HWIFI_WED_SUPPORT"
+    verify_disabled_pkg "H5000M MTK WED driver (ENABLE_WED=false)" "kmod-mtk_wed"
+  fi
   verify_config_symbol "H5000M MT7992 Kconfig" "CONFIG_MTK_HWIFI_MT7992=y"
   verify_config_symbol "H5000M MT799A Kconfig" "CONFIG_MTK_HWIFI_MT799A=y"
   # MT7992 specific tuning parameters (from upstream)
@@ -2244,7 +2283,6 @@ EOF
   verify_config_symbol "H5000M WIFI7 third if none" "CONFIG_MTK_WIFI7_THIRD_IF_NONE=y"
   verify_config_symbol "H5000M WIFI7 WHNAT support" "CONFIG_MTK_WIFI7_WHNAT_SUPPORT=m"
   verify_enabled_pkg "H5000M MTK PCI driver" "kmod-mtk_pci" true
-  verify_enabled_pkg "H5000M MTK WED driver" "kmod-mtk_wed" true
   verify_enabled_pkg "H5000M Connac interface" "kmod-connac_if" true
   verify_enabled_pkg "H5000M MT7992 chip driver" "kmod-mt7992" true
   verify_enabled_pkg "H5000M MT799A chip driver" "kmod-mt799a" true
@@ -2260,6 +2298,40 @@ verify_enabled_pkg() {
     echo "${feature_name} requested but CONFIG_PACKAGE_${config_name}=y is not active after defconfig" >&2
     grep -n "PACKAGE_${config_name}" .config || true
     exit 1
+  fi
+}
+
+# Inverse checks: fail if something that must be OFF came back after
+# defconfig (e.g. re-enabled by a later config_enable or pulled in by a
+# Kconfig select). verify_enabled_pkg alone cannot catch that.
+verify_disabled_pkg() {
+  local feature_name="$1"
+  local config_name="$2"
+  if grep -qE "^CONFIG_PACKAGE_${config_name}=[ym]$" .config; then
+    echo "${feature_name}: CONFIG_PACKAGE_${config_name} must be disabled but is still active after defconfig" >&2
+    grep -n "PACKAGE_${config_name}" .config || true
+    exit 1
+  fi
+}
+
+verify_disabled_symbol() {
+  local feature_name="$1"
+  local symbol="$2"
+  if grep -qE "^CONFIG_${symbol}=[ym]$" .config; then
+    echo "${feature_name}: CONFIG_${symbol} must be disabled but is still active after defconfig" >&2
+    grep -n "CONFIG_${symbol}" .config || true
+    exit 1
+  fi
+}
+
+apply_wed_setting() {
+  if is_true "$ENABLE_WED"; then
+    config_enable PACKAGE_kmod-mtk_wed
+    config_enable MTK_HWIFI_WED_SUPPORT
+  else
+    log "ENABLE_WED=false: disabling kmod-mtk_wed and MTK_HWIFI_WED_SUPPORT"
+    config_disable PACKAGE_kmod-mtk_wed
+    config_disable MTK_HWIFI_WED_SUPPORT
   fi
 }
 
@@ -2402,7 +2474,10 @@ collect_artifacts() {
   rm -rf "$ARTIFACTS_DIR"
   mkdir -p "$ARTIFACTS_DIR"
 
-  find "$SOURCE_DIR/bin/targets" -type f \( -name '*.bin' -o -name '*.img.gz' \) -exec cp -f {} "$ARTIFACTS_DIR/" \;
+  # Only ship H5000M images. The filogic target also emits bl2 preloaders for
+  # other reference boards (mt7981-ram-ddr3/ddr4-bl2.bin, mt7986-ram-ddr3/ddr4-bl2.bin);
+  # those are NOT for the H5000M (MT7987A) and must never be flashed on it.
+  find "$SOURCE_DIR/bin/targets" -type f -name '*hiveton-h5000m*' \( -name '*.bin' -o -name '*.img.gz' -o -name '*.itb' \) -exec cp -f {} "$ARTIFACTS_DIR/" \;
   find "$SOURCE_DIR/bin/targets" -type f -name '*hiveton-h5000m*.manifest' -exec cp -f {} "$ARTIFACTS_DIR/openwrt-image.manifest" \; -quit
   if [ -z "$(ls -A "$ARTIFACTS_DIR" 2>/dev/null)" ]; then
     die "No firmware artifacts found under $SOURCE_DIR/bin/targets"
@@ -2415,7 +2490,6 @@ collect_artifacts() {
     kmod-mt_wifi7 \
     kmod-mt_hwifi \
     kmod-mtk_pci \
-    kmod-mtk_wed \
     kmod-connac_if \
     kmod-mt7992 \
     kmod-mt799a \
@@ -2425,6 +2499,16 @@ collect_artifacts() {
     grep -q "^${image_pkg}[[:space:]-]" "$ARTIFACTS_DIR/openwrt-image.manifest" || \
       die "Firmware image manifest is missing required package: ${image_pkg}"
   done
+
+  if is_true "$ENABLE_WED"; then
+    grep -q '^kmod-mtk_wed[[:space:]-]' "$ARTIFACTS_DIR/openwrt-image.manifest" || \
+      die "Firmware image manifest is missing required package: kmod-mtk_wed (ENABLE_WED=true)"
+  elif grep -q '^kmod-mtk_wed[[:space:]-]' "$ARTIFACTS_DIR/openwrt-image.manifest"; then
+    die "Firmware image manifest still contains kmod-mtk_wed although ENABLE_WED=false"
+  fi
+  if ! is_true "$ENABLE_ORIGINAL_MODEM" && grep -q '^modemmanager[[:space:]-]' "$ARTIFACTS_DIR/openwrt-image.manifest"; then
+    die "Firmware image manifest contains modemmanager although ENABLE_ORIGINAL_MODEM=false (would fight QModem for the modem)"
+  fi
 
   if is_true "$ENABLE_ADGUARDHOME" && ! grep -q '^luci-i18n-adguardhome-zh-cn[[:space:]-]' "$ARTIFACTS_DIR/openwrt-image.manifest"; then
     die "Firmware image manifest is missing required package: luci-i18n-adguardhome-zh-cn"

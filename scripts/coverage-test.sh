@@ -45,9 +45,9 @@ log() {
 base_env=(
   ENABLE_ADGUARDHOME=false
   ENABLE_OPENCLASH=false
-  ENABLE_NIKKI=true
+  ENABLE_NIKKI=false
   ENABLE_UPNP=true
-  ENABLE_VLMCSD=true
+  ENABLE_VLMCSD=false
   ENABLE_MOSDNS=true
   ENABLE_DOCKERMAN=false
   ENABLE_HOMEPROXY=false
@@ -56,6 +56,8 @@ base_env=(
   ENABLE_QMODEM=true
   ENABLE_QMODEM_NEXT=true
   ENABLE_QMODEM_LUA=false
+  ENABLE_WED=true
+  LAN_IP=192.168.100.1
 )
 
 run_static_checks() {
@@ -133,6 +135,10 @@ run_named_profile() {
       run_profile qmodem-lua "$mode" \
         ENABLE_NIKKI=false ENABLE_MOSDNS=false ENABLE_ORIGINAL_MODEM=false ENABLE_QMODEM=true ENABLE_QMODEM_NEXT=false ENABLE_QMODEM_LUA=true
       ;;
+    wed-off)
+      run_profile wed-off "$mode" \
+        ENABLE_WED=false
+      ;;
     adblock)
       run_profile adblock "$mode" \
         ENABLE_NIKKI=false ENABLE_MOSDNS=false ENABLE_ADBLOCK=true
@@ -163,7 +169,7 @@ profiles_for_set() {
       printf '%s\n' default proxy-stack
       ;;
     full)
-      printf '%s\n' default minimal proxy-stack homeproxy-only mosdns-only nikki-only original-modem qmodem qmodem-lua adblock optional-services all-compatible dockerman
+      printf '%s\n' default minimal proxy-stack homeproxy-only mosdns-only nikki-only original-modem qmodem qmodem-lua wed-off adblock optional-services all-compatible dockerman
       ;;
     *)
       echo "Unknown PROFILE_SET: $PROFILE_SET" >&2

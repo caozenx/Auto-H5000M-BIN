@@ -29,9 +29,9 @@ on:
         default: false
         type: boolean
       enable_nikki:
-        description: '启用 Nikki'
+        description: '启用 Nikki（mihomo 代理，默认关闭）'
         required: false
-        default: true
+        default: false
         type: boolean
       enable_upnp:
         description: '启用 UPnP'
@@ -39,9 +39,9 @@ on:
         default: true
         type: boolean
       enable_vlmcsd:
-        description: '启用 VLMCSd'
+        description: '启用 VLMCSd（KMS 激活服务器，默认关闭）'
         required: false
-        default: true
+        default: false
         type: boolean
       enable_mosdns:
         description: '启用 MosDNS'
@@ -83,6 +83,16 @@ on:
         required: false
         default: true
         type: boolean
+      enable_wed:
+        description: '启用 WED（MTK WiFi 硬件转发加速，默认开启；关闭后 WiFi 转发走 CPU）'
+        required: false
+        default: true
+        type: boolean
+      lan_ip:
+        description: '默认 LAN 地址（仅影响全新刷机/恢复出厂，保留配置升级不受影响）'
+        required: false
+        default: '192.168.100.1'
+        type: string
       publish_release:
         description: '上传 Release（默认 true）'
         required: false
@@ -144,10 +154,11 @@ jobs:
         run: |
           set -euo pipefail
           declare -A scheduled_defaults=(
-            [enable_adguardhome]=false [enable_openclash]=false [enable_nikki]=true
-            [enable_upnp]=true [enable_vlmcsd]=true [enable_mosdns]=true [enable_dockerman]=false
+            [enable_adguardhome]=false [enable_openclash]=false [enable_nikki]=false
+            [enable_upnp]=true [enable_vlmcsd]=false [enable_mosdns]=true [enable_dockerman]=false
             [enable_homeproxy]=false [enable_original_modem]=false [enable_adblock]=true
             [enable_qmodem]=true [enable_qmodem_next]=true [enable_qmodem_lua]=false
+            [enable_wed]=true [lan_ip]=192.168.100.1
             [publish_release]=true [run_config_coverage]=false [coverage_profile_set]=quick
             [full_build_smoke_profile]=''
           )
@@ -165,6 +176,8 @@ jobs:
             [enable_qmodem]='${{ github.event.inputs.enable_qmodem }}'
             [enable_qmodem_next]='${{ github.event.inputs.enable_qmodem_next }}'
             [enable_qmodem_lua]='${{ github.event.inputs.enable_qmodem_lua }}'
+            [enable_wed]='${{ github.event.inputs.enable_wed }}'
+            [lan_ip]='${{ github.event.inputs.lan_ip }}'
             [publish_release]='${{ github.event.inputs.publish_release }}'
             [run_config_coverage]='${{ github.event.inputs.run_config_coverage }}'
             [coverage_profile_set]='${{ github.event.inputs.coverage_profile_set }}'
@@ -227,10 +240,11 @@ jobs:
         run: |
           set -euo pipefail
           declare -A defaults=(
-            [enable_adguardhome]=false [enable_openclash]=false [enable_nikki]=true
-            [enable_upnp]=true [enable_vlmcsd]=true [enable_mosdns]=true [enable_dockerman]=false
+            [enable_adguardhome]=false [enable_openclash]=false [enable_nikki]=false
+            [enable_upnp]=true [enable_vlmcsd]=false [enable_mosdns]=true [enable_dockerman]=false
             [enable_homeproxy]=false [enable_original_modem]=false [enable_adblock]=true
             [enable_qmodem]=true [enable_qmodem_next]=true [enable_qmodem_lua]=false
+            [enable_wed]=true [lan_ip]=192.168.100.1
             [publish_release]=true
           )
           declare -A inputs=(
@@ -247,6 +261,8 @@ jobs:
             [enable_qmodem]='${{ github.event.inputs.enable_qmodem }}'
             [enable_qmodem_next]='${{ github.event.inputs.enable_qmodem_next }}'
             [enable_qmodem_lua]='${{ github.event.inputs.enable_qmodem_lua }}'
+            [enable_wed]='${{ github.event.inputs.enable_wed }}'
+            [lan_ip]='${{ github.event.inputs.lan_ip }}'
             [publish_release]='${{ github.event.inputs.publish_release }}'
           )
           for k in "${!defaults[@]}"; do
@@ -327,6 +343,8 @@ jobs:
           ENABLE_QMODEM: ${{ steps.features.outputs.enable_qmodem }}
           ENABLE_QMODEM_NEXT: ${{ steps.features.outputs.enable_qmodem_next }}
           ENABLE_QMODEM_LUA: ${{ steps.features.outputs.enable_qmodem_lua }}
+          ENABLE_WED: ${{ steps.features.outputs.enable_wed }}
+          LAN_IP: ${{ steps.features.outputs.lan_ip }}
         run: |
           set -euo pipefail
           export PATH="/usr/lib/ccache:$PATH"
@@ -380,6 +398,10 @@ jobs:
               - QModem-Next: ${{ steps.features.outputs.enable_qmodem_next }}
               - QModem-Lua:  ${{ steps.features.outputs.enable_qmodem_lua }}
             - Adblock:     ${{ steps.features.outputs.enable_adblock }}
+            - WED:         ${{ steps.features.outputs.enable_wed }}
+            - 默认 LAN:    ${{ steps.features.outputs.lan_ip }}
+
+            ⚠️ 只刷 `*-hiveton-h5000m-squashfs-sysupgrade.bin`（升级）或 `*-initramfs-kernel.bin`（U-Boot 恢复）。
           prerelease: false
           make_latest: true
           overwrite_files: true
