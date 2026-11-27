@@ -47,16 +47,14 @@ base_env=(
   ENABLE_OPENCLASH=false
   ENABLE_NIKKI=false
   ENABLE_UPNP=true
-  ENABLE_VLMCSD=false
   ENABLE_MOSDNS=true
-  ENABLE_DOCKERMAN=false
   ENABLE_HOMEPROXY=false
   ENABLE_ORIGINAL_MODEM=false
   ENABLE_ADBLOCK=true
   ENABLE_QMODEM=true
   ENABLE_QMODEM_NEXT=true
   ENABLE_QMODEM_LUA=false
-  ENABLE_WED=true
+  ENABLE_WED=false
   ENABLE_CLOUDFLARED=true
   ENABLE_HNAT=false
   LAN_IP=192.168.100.1
@@ -107,7 +105,7 @@ run_named_profile() {
       ;;
     minimal)
       run_profile minimal "$mode" \
-        ENABLE_NIKKI=false ENABLE_UPNP=false ENABLE_VLMCSD=false ENABLE_MOSDNS=false \
+        ENABLE_NIKKI=false ENABLE_UPNP=false ENABLE_MOSDNS=false \
       ;;
     proxy-stack)
       run_profile proxy-stack "$mode" \
@@ -137,9 +135,9 @@ run_named_profile() {
       run_profile qmodem-lua "$mode" \
         ENABLE_NIKKI=false ENABLE_MOSDNS=false ENABLE_ORIGINAL_MODEM=false ENABLE_QMODEM=true ENABLE_QMODEM_NEXT=false ENABLE_QMODEM_LUA=true
       ;;
-    wed-off)
-      run_profile wed-off "$mode" \
-        ENABLE_WED=false
+    wed-on)
+      run_profile wed-on "$mode" \
+        ENABLE_WED=true
       ;;
     cloudflared-off)
       run_profile cloudflared-off "$mode" \
@@ -156,11 +154,7 @@ run_named_profile() {
     all-compatible)
       run_profile all-compatible "$mode" \
         ENABLE_ADGUARDHOME=true ENABLE_OPENCLASH=true ENABLE_NIKKI=true ENABLE_UPNP=true \
-        ENABLE_VLMCSD=true ENABLE_MOSDNS=true ENABLE_DOCKERMAN=true \
-      ;;
-    dockerman)
-      run_profile dockerman "$mode" \
-        ENABLE_NIKKI=false ENABLE_MOSDNS=false ENABLE_DOCKERMAN=true
+        ENABLE_MOSDNS=true \
       ;;
     *)
       echo "Unknown coverage profile: $name" >&2
@@ -175,7 +169,7 @@ profiles_for_set() {
       printf '%s\n' default proxy-stack
       ;;
     full)
-      printf '%s\n' default minimal proxy-stack homeproxy-only mosdns-only nikki-only original-modem qmodem qmodem-lua wed-off cloudflared-off adblock optional-services all-compatible dockerman
+      printf '%s\n' default minimal proxy-stack homeproxy-only mosdns-only nikki-only original-modem qmodem qmodem-lua wed-on cloudflared-off adblock optional-services all-compatible
       ;;
     *)
       echo "Unknown PROFILE_SET: $PROFILE_SET" >&2

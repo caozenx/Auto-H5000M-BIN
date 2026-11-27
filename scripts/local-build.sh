@@ -36,19 +36,27 @@ ENABLE_ADGUARDHOME="${ENABLE_ADGUARDHOME:-false}"
 ENABLE_OPENCLASH="${ENABLE_OPENCLASH:-false}"
 ENABLE_NIKKI="${ENABLE_NIKKI:-false}"
 ENABLE_UPNP="${ENABLE_UPNP:-true}"
-ENABLE_VLMCSD="${ENABLE_VLMCSD:-false}"
 ENABLE_MOSDNS="${ENABLE_MOSDNS:-true}"
-ENABLE_DOCKERMAN="${ENABLE_DOCKERMAN:-false}"
 ENABLE_HOMEPROXY="${ENABLE_HOMEPROXY:-false}"
 ENABLE_ADBLOCK="${ENABLE_ADBLOCK:-true}"
 
+# Packages removed from this fork (no switch). Pinned "not set" before
+# defconfig and checked absent afterwards and in the image manifest.
+REMOVED_PKGS=(
+  vlmcsd luci-app-vlmcsd luci-i18n-vlmcsd-zh-cn
+  luci-app-dockerman luci-i18n-dockerman-zh-cn luci-lib-docker
+  docker dockerd docker-compose
+)
+
 # WED (Wireless Ethernet Dispatch): MediaTek NETSYS hardware path that moves
-# Ethernet <-> Wi-Fi packet forwarding off the CPU. true = upstream default
-# (best Wi-Fi throughput, lowest CPU); false = CPU handles Wi-Fi forwarding
-# (lower throughput, simpler data path, useful for A/B testing Wi-Fi bugs).
+# Ethernet <-> Wi-Fi packet forwarding off the CPU. Only used while HNAT is
+# active. Default false in this fork (2026-11-27): HNAT corrupted WAN->Wi-Fi
+# PPE entries on H5000M and ENABLE_HNAT defaults to false, so WED would only
+# add a TEST-grade driver. true = upstream behaviour (needs ENABLE_HNAT=true
+# to have any effect).
 # Applied in apply_wed_setting() AFTER enable_h5000m_wifi_driver_config so the
 # driver block cannot silently re-enable it, and checked after defconfig.
-ENABLE_WED="${ENABLE_WED:-true}"
+ENABLE_WED="${ENABLE_WED:-false}"
 
 # Cloudflare Tunnel client + LuCI panel (immortalwrt packages/luci feeds:
 # net/cloudflared, applications/luci-app-cloudflared). /etc/config/cloudflared
@@ -118,7 +126,7 @@ Options:
 
 Feature switches are controlled by environment variables, for example:
   ENABLE_MOSDNS=false ENABLE_ORIGINAL_MODEM=true ENABLE_ADBLOCK=true THREADS=8 scripts/local-build.sh
-  ENABLE_WED=false LAN_IP=192.168.1.1 scripts/local-build.sh
+  ENABLE_WED=true ENABLE_HNAT=true LAN_IP=192.168.1.1 scripts/local-build.sh
   ENABLE_CLOUDFLARED=false ENABLE_HNAT=true scripts/local-build.sh
 
 Default feature switches match the scheduled GitHub Actions build.
@@ -391,9 +399,7 @@ AdGuardHome=${ENABLE_ADGUARDHOME}
 OpenClash=${ENABLE_OPENCLASH}
 Nikki=${ENABLE_NIKKI}
 UPnP=${ENABLE_UPNP}
-VLMCSd=${ENABLE_VLMCSD}
 MosDNS=${ENABLE_MOSDNS}
-DockerMan=${ENABLE_DOCKERMAN}
 HomeProxy=${ENABLE_HOMEPROXY}
 Adblock=${ENABLE_ADBLOCK}
 Original Modem=${ENABLE_ORIGINAL_MODEM}
@@ -1197,11 +1203,6 @@ apply_package_fixes() {
 
   rm -rf package/feeds/packages/{exim,onionshare-cli,python-zope-event,python-zope-interface,python-gevent,python-twisted} 2>/dev/null || true
 
-  if is_true "$ENABLE_VLMCSD"; then
-    run_with_timeout "$FEEDS_TIMEOUT" "feeds install vlmcsd" ./scripts/feeds install -f vlmcsd || true
-    run_with_timeout "$FEEDS_TIMEOUT" "feeds install luci-app-vlmcsd" ./scripts/feeds install -f luci-app-vlmcsd || true
-  fi
-
   if is_true "$ENABLE_NIKKI"; then
     rm -rf feeds/nikki/mihomo-alpha package/feeds/nikki/mihomo-alpha 2>/dev/null || true
     [ -f "feeds/nikki/mihomo-meta/Makefile" ] && sed -i '/^[[:space:]]*CONFLICTS:=mihomo-alpha/d' "feeds/nikki/mihomo-meta/Makefile" || true
@@ -1298,11 +1299,6 @@ export MIHOMO_TCP_KEEPALIVE="1"\
   if is_true "$ENABLE_UPNP"; then
     feed_install_pkg miniupnpd-nftables
     feed_install_pkg luci-app-upnp
-  fi
-
-  if is_true "$ENABLE_VLMCSD"; then
-    feed_install_pkg vlmcsd
-    feed_install_pkg luci-app-vlmcsd
   fi
 
 
@@ -2023,6 +2019,9 @@ EOF
   apply_wed_setting
 
   local disabled_pkgs=("luci-app-sms-tool-lite" "luci-app-3ginfo-lite")
+  # VLMCSd (KMS) and DockerMan/Docker were removed from this fork; upstream
+  # defconfig already has them "not set", keep them pinned off anyway.
+  disabled_pkgs+=("${REMOVED_PKGS[@]}")
 
   if is_true "$ENABLE_NIKKI"; then
     cat >> .config <<'EOF'
@@ -2063,7 +2062,6 @@ EOF
   else
     disabled_pkgs+=("luci-app-upnp" "luci-i18n-upnp-zh-cn" "miniupnpd-nftables" "miniupnpd-iptables")
   fi
-  is_true "$ENABLE_VLMCSD" && { echo "CONFIG_PACKAGE_luci-app-vlmcsd=y" >> .config; echo "CONFIG_PACKAGE_luci-i18n-vlmcsd-zh-cn=y" >> .config; echo "CONFIG_PACKAGE_vlmcsd=y" >> .config; } || disabled_pkgs+=("luci-app-vlmcsd" "luci-i18n-vlmcsd-zh-cn" "vlmcsd")
   if is_true "$ENABLE_MOSDNS"; then
     cat >> .config <<'EOF'
 CONFIG_PACKAGE_luci-app-mosdns=y
@@ -2104,20 +2102,6 @@ EOF
     disabled_pkgs+=("cloudflared" "luci-app-cloudflared" "luci-i18n-cloudflared-zh-cn")
   fi
   # adbyby-plus removed; upstream adblock (see enable_adblock_stack_config) covers ad-blocking
-
-  if is_true "$ENABLE_DOCKERMAN"; then
-    cat >> .config <<'EOF'
-CONFIG_PACKAGE_luci-app-dockerman=y
-CONFIG_PACKAGE_luci-i18n-dockerman-zh-cn=y
-CONFIG_PACKAGE_luci-lib-docker=y
-CONFIG_PACKAGE_docker=y
-CONFIG_PACKAGE_dockerd=y
-CONFIG_PACKAGE_containerd=y
-CONFIG_PACKAGE_runc=y
-EOF
-  else
-    disabled_pkgs+=("luci-app-dockerman" "luci-i18n-dockerman-zh-cn" "luci-lib-docker")
-  fi
 
   # Modem stack — mutually exclusive Original vs QModem (resolved in
   # resolve_modem_stack). enable_modem_stack_config declares the kernel
@@ -2178,26 +2162,12 @@ EOF
     config_enable PACKAGE_kmod-tun
   fi
 
-  if is_true "$ENABLE_VLMCSD"; then
-    config_enable PACKAGE_vlmcsd
-    config_enable PACKAGE_luci-app-vlmcsd
-    config_enable PACKAGE_luci-i18n-vlmcsd-zh-cn
-  fi
-
   if is_true "$ENABLE_CLOUDFLARED"; then
     enable_cloudflared_config
   fi
 
   run_with_timeout "$CONFIG_TIMEOUT" "make defconfig" make FORCE=1 defconfig -j"${THREADS}"
   retry_upnp_config_if_needed
-
-  if is_true "$ENABLE_VLMCSD" && ! grep -q '^CONFIG_PACKAGE_luci-app-vlmcsd=y$' .config; then
-    run_with_timeout "$FEEDS_TIMEOUT" "feeds install vlmcsd after VLMCSd retry" ./scripts/feeds install -f vlmcsd || true
-    run_with_timeout "$FEEDS_TIMEOUT" "feeds install luci-app-vlmcsd after VLMCSd retry" ./scripts/feeds install -f luci-app-vlmcsd || true
-    config_enable PACKAGE_vlmcsd
-    config_enable PACKAGE_luci-app-vlmcsd
-    run_with_timeout "$CONFIG_TIMEOUT" "make defconfig after VLMCSd retry" make FORCE=1 defconfig -j"${THREADS}"
-  fi
 
   verify_enabled_pkg "Nikki" "luci-app-nikki" "$ENABLE_NIKKI"
   verify_enabled_pkg "Nikki zh-cn" "luci-i18n-nikki-zh-cn" "$ENABLE_NIKKI"
@@ -2217,15 +2187,15 @@ EOF
   verify_enabled_pkg "UPnP" "luci-app-upnp" "$ENABLE_UPNP"
   verify_enabled_pkg "UPnP zh-cn" "luci-i18n-upnp-zh-cn" "$ENABLE_UPNP"
   verify_enabled_pkg "UPnP miniupnpd" "miniupnpd-nftables" "$ENABLE_UPNP"
-  verify_enabled_pkg "VLMCSd" "luci-app-vlmcsd" "$ENABLE_VLMCSD"
-  verify_enabled_pkg "VLMCSd zh-cn" "luci-i18n-vlmcsd-zh-cn" "$ENABLE_VLMCSD"
   verify_enabled_pkg "MosDNS" "luci-app-mosdns" "$ENABLE_MOSDNS"
   verify_enabled_pkg "MosDNS zh-cn" "luci-i18n-mosdns-zh-cn" "$ENABLE_MOSDNS"
   verify_enabled_pkg "MosDNS core" "mosdns" "$ENABLE_MOSDNS"
   verify_enabled_pkg "MosDNS geoip" "v2ray-geoip" "$ENABLE_MOSDNS"
   verify_enabled_pkg "MosDNS geosite" "v2ray-geosite" "$ENABLE_MOSDNS"
-  verify_enabled_pkg "DockerMan" "luci-app-dockerman" "$ENABLE_DOCKERMAN"
-  verify_enabled_pkg "DockerMan zh-cn" "luci-i18n-dockerman-zh-cn" "$ENABLE_DOCKERMAN"
+  local removed_pkg
+  for removed_pkg in "${REMOVED_PKGS[@]}"; do
+    verify_disabled_pkg "Removed package" "$removed_pkg"
+  done
   verify_enabled_pkg "Original Modem" "luci-app-modem" "$ENABLE_ORIGINAL_MODEM"
   verify_enabled_pkg "Original Modem zh-cn" "luci-i18n-modem-zh-cn" "$ENABLE_ORIGINAL_MODEM"
   # Modem kernel module verification — these MUST survive defconfig
@@ -2597,6 +2567,11 @@ collect_artifacts() {
   elif grep -q '^cloudflared[[:space:]-]' "$ARTIFACTS_DIR/openwrt-image.manifest"; then
     die "Firmware image manifest still contains cloudflared although ENABLE_CLOUDFLARED=false"
   fi
+  for image_pkg in "${REMOVED_PKGS[@]}"; do
+    if grep -q "^${image_pkg}[[:space:]-]" "$ARTIFACTS_DIR/openwrt-image.manifest"; then
+      die "Firmware image manifest contains removed package: ${image_pkg}"
+    fi
+  done
   if is_true "$ENABLE_ADBLOCK" && ! grep -q '^adblock[[:space:]-]' "$ARTIFACTS_DIR/openwrt-image.manifest"; then
     die "Firmware image manifest is missing required package: adblock"
   fi

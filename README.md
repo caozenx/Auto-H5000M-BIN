@@ -53,7 +53,7 @@
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `ENABLE_WED` | `true` | MTK Wi-Fi 硬件转发加速（编译期，决定是否编入 `kmod-mtk_wed`），见下文 [WED](#wed-是什么开还是关) |
+| `ENABLE_WED` | `false` | MTK Wi-Fi 硬件转发加速（编译期，决定是否编入 `kmod-mtk_wed`），见下文 [WED](#wed-是什么开还是关) |
 | `ENABLE_HNAT` | `false` | 刷机后 TurboACC 是否默认开 MediaTek HNAT。`false` = 打包 `zz-h5000m-turboacc`，首启设 `fastpath=none`、`fullcone=0`（包仍在，LuCI 可手动打开），见 [HNAT 已知问题](#hnat--wed-已知问题连接中途卡死) |
 | `ENABLE_CLOUDFLARED` | `true` | Cloudflare Tunnel：`cloudflared` + `luci-app-cloudflared` + 中文包（immortalwrt 官方 feed）。feed 里的 `cloudflared` 是 `2025.5.0`（`openwrt-24.10` 分支，2026-11-27 查），比官方发布旧；`/etc/config/cloudflared`（含 token）随保留配置升级保留 |
 | `LAN_IP` | `192.168.100.1` | 默认 LAN 地址 |
@@ -65,11 +65,9 @@
 | `ENABLE_MOSDNS` | `true` | MosDNS + v2ray-geodata |
 | `ENABLE_ADBLOCK` | `true` | DNS 层广告 / 恶意域名过滤 |
 | `ENABLE_NIKKI` | `false` | Nikki（mihomo）代理 |
-| `ENABLE_VLMCSD` | `false` | KMS 激活服务器 |
 | `ENABLE_ADGUARDHOME` | `false` | AdGuardHome |
 | `ENABLE_OPENCLASH` | `false` | OpenClash |
 | `ENABLE_HOMEPROXY` | `false` | HomeProxy |
-| `ENABLE_DOCKERMAN` | `false` | DockerMan + dockerd |
 
 下载加速（国内网络可按需覆盖）：
 
@@ -85,14 +83,14 @@
 
 **WED（Wireless Ethernet Dispatch）** 是 MediaTek NETSYS 里的一块硬件：开启后，有线 ↔ Wi-Fi 之间的转发由硬件（配合 HNAT / PPE）直接完成，不再经过 CPU。
 
-| | 开启（默认） | 关闭 |
+| | 开启 | 关闭（默认） |
 | --- | --- | --- |
 | Wi-Fi 吞吐 | 最高 | 受 CPU（4 × Cortex-A53）限制，高带宽时下降 |
 | CPU 占用 | 低 | Wi-Fi 大流量时明显升高 |
 | 数据通路 | 硬件转发，问题较难排查 | 全走内核，便于抓包、排查 |
 | 风险 | 原仓库提到个别环境重启后进入死循环（未在本机复现） | 性能损失 |
 
-**建议保持开启**，只在遇到 Wi-Fi 稳定性问题、需要对照排查时临时用 `ENABLE_WED=false` 编一版测试。
+**本 fork 默认关闭**（2026-11-27 起）：H5000M 上 HNAT 写错发往 Wi-Fi 的转发条目（见下文），而 WED 只在 HNAT 开启时才被用到；默认已关 HNAT，带上 WED 没有收益，反而多一个 TEST 版驱动（`kmod-mtk_wed 6.6.94.TEST-r1`）。需要 Wi-Fi 硬件转发时用 `ENABLE_WED=true ENABLE_HNAT=true` 编一版。`ENABLE_WED=false` 的完整固件**尚未编译和实机验证**。
 
 > `ENABLE_WED` 是**编译期**开关，只决定固件里有没有 WED；真正让流量走硬件的是**运行时**的 TurboACC（`fastpath=mediatek_hnat`）。WED 只在 HNAT 开启时起作用，`ENABLE_HNAT=false`（默认）时 WED 编进去也不会被用上。由于下面的问题，本 fork 默认关 HNAT。
 
@@ -166,6 +164,7 @@
 | `set_default_lan_ip()` | 把上游 `config_generate` 里的默认 `192.168.6.1` 改为 `LAN_IP`，并校验地址格式 |
 | `apply_wed_setting()` | 见上文 WED |
 | `apply_hnat_default()` | `ENABLE_HNAT=false` 时生成 `files/etc/uci-defaults/zz-h5000m-turboacc`（`fastpath=none`、`fullcone=0`），见 [HNAT 已知问题](#hnat--wed-已知问题连接中途卡死) |
+| 移除 VLMCSd、DockerMan / Docker | 删掉 `ENABLE_VLMCSD`、`ENABLE_DOCKERMAN` 开关；`REMOVED_PKGS`（`vlmcsd`、`luci-app-vlmcsd`、`luci-app-dockerman`、`luci-lib-docker`、`docker`、`dockerd` 等）在 defconfig 前强制关闭，defconfig 后和固件清单里校验不存在 |
 | Cloudflared | `ENABLE_CLOUDFLARED` 控制 `cloudflared` / `luci-app-cloudflared` / 中文包；defconfig 后和固件清单都做双向校验 |
 | ModemManager | 见上文 5G 模组 |
 | 发布产物 | 只发布 `*hiveton-h5000m*`，不再附带 MT7981 / MT7986 的 bl2 |
@@ -202,7 +201,7 @@ THREADS=8 bash scripts/local-build.sh
 ```
 
 ```bash
-ENABLE_WED=false LAN_IP=192.168.1.1 bash scripts/local-build.sh
+ENABLE_WED=true LAN_IP=192.168.1.1 bash scripts/local-build.sh
 ```
 
 只验证配置（拉源码、feeds、补丁、defconfig 和包校验，不编译）：
@@ -219,7 +218,7 @@ bash scripts/local-build.sh --config-only
 ```
 
 ```powershell
-$env:ENABLE_WED = 'false'; $env:LAN_IP = '192.168.1.1'
+$env:ENABLE_WED = 'true'; $env:LAN_IP = '192.168.1.1'
 .\scripts\local-build.ps1
 ```
 
@@ -246,7 +245,7 @@ bash scripts/coverage-test.sh quick
 PROFILE_SET=full bash scripts/coverage-test.sh
 ```
 
-`quick` = 默认配置 + 代理栈；`full` 额外覆盖最小系统、HomeProxy / MosDNS / Nikki 单独、原版 modem、QModem（next / lua）、**WED 关闭**、**Cloudflared 关 + HNAT 默认开**（`cloudflared-off`）、Adblock、可选服务、全兼容插件、DockerMan。覆盖测试能降低回归风险，但不能代替刷机后的实机验证。
+`quick` = 默认配置 + 代理栈；`full` 额外覆盖最小系统、HomeProxy / MosDNS / Nikki 单独、原版 modem、QModem（next / lua）、**WED 开启**（`wed-on`）、**Cloudflared 关 + HNAT 默认开**（`cloudflared-off`）、Adblock、可选服务、全兼容插件。覆盖测试能降低回归风险，但不能代替刷机后的实机验证。
 
 ---
 

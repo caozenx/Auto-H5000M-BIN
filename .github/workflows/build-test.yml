@@ -38,20 +38,10 @@ on:
         required: false
         default: true
         type: boolean
-      enable_vlmcsd:
-        description: '启用 VLMCSd（KMS 激活服务器，默认关闭）'
-        required: false
-        default: false
-        type: boolean
       enable_mosdns:
         description: '启用 MosDNS'
         required: false
         default: true
-        type: boolean
-      enable_dockerman:
-        description: '启用 DockerMan'
-        required: false
-        default: false
         type: boolean
       enable_homeproxy:
         description: '启用 HomeProxy'
@@ -84,9 +74,9 @@ on:
         default: true
         type: boolean
       enable_wed:
-        description: '启用 WED（MTK WiFi 硬件转发加速，默认开启；关闭后 WiFi 转发走 CPU）'
+        description: '编入 WED（MTK Wi-Fi 硬件转发，默认关闭；仅在 HNAT 开启时起作用）'
         required: false
-        default: true
+        default: false
         type: boolean
       enable_cloudflared:
         description: '启用 Cloudflare Tunnel（cloudflared + luci-app-cloudflared）'
@@ -165,10 +155,10 @@ jobs:
           set -euo pipefail
           declare -A scheduled_defaults=(
             [enable_adguardhome]=false [enable_openclash]=false [enable_nikki]=false
-            [enable_upnp]=true [enable_vlmcsd]=false [enable_mosdns]=true [enable_dockerman]=false
+            [enable_upnp]=true [enable_mosdns]=true
             [enable_homeproxy]=false [enable_original_modem]=false [enable_adblock]=true
             [enable_qmodem]=true [enable_qmodem_next]=true [enable_qmodem_lua]=false
-            [enable_wed]=true [enable_cloudflared]=true [enable_hnat]=false [lan_ip]=192.168.100.1
+            [enable_wed]=false [enable_cloudflared]=true [enable_hnat]=false [lan_ip]=192.168.100.1
             [publish_release]=true [run_config_coverage]=false [coverage_profile_set]=quick
             [full_build_smoke_profile]=''
           )
@@ -177,9 +167,7 @@ jobs:
             [enable_openclash]='${{ github.event.inputs.enable_openclash }}'
             [enable_nikki]='${{ github.event.inputs.enable_nikki }}'
             [enable_upnp]='${{ github.event.inputs.enable_upnp }}'
-            [enable_vlmcsd]='${{ github.event.inputs.enable_vlmcsd }}'
             [enable_mosdns]='${{ github.event.inputs.enable_mosdns }}'
-            [enable_dockerman]='${{ github.event.inputs.enable_dockerman }}'
             [enable_homeproxy]='${{ github.event.inputs.enable_homeproxy }}'
             [enable_original_modem]='${{ github.event.inputs.enable_original_modem }}'
             [enable_adblock]='${{ github.event.inputs.enable_adblock }}'
@@ -253,10 +241,10 @@ jobs:
           set -euo pipefail
           declare -A defaults=(
             [enable_adguardhome]=false [enable_openclash]=false [enable_nikki]=false
-            [enable_upnp]=true [enable_vlmcsd]=false [enable_mosdns]=true [enable_dockerman]=false
+            [enable_upnp]=true [enable_mosdns]=true
             [enable_homeproxy]=false [enable_original_modem]=false [enable_adblock]=true
             [enable_qmodem]=true [enable_qmodem_next]=true [enable_qmodem_lua]=false
-            [enable_wed]=true [enable_cloudflared]=true [enable_hnat]=false [lan_ip]=192.168.100.1
+            [enable_wed]=false [enable_cloudflared]=true [enable_hnat]=false [lan_ip]=192.168.100.1
             [publish_release]=true
           )
           declare -A inputs=(
@@ -264,9 +252,7 @@ jobs:
             [enable_openclash]='${{ github.event.inputs.enable_openclash }}'
             [enable_nikki]='${{ github.event.inputs.enable_nikki }}'
             [enable_upnp]='${{ github.event.inputs.enable_upnp }}'
-            [enable_vlmcsd]='${{ github.event.inputs.enable_vlmcsd }}'
             [enable_mosdns]='${{ github.event.inputs.enable_mosdns }}'
-            [enable_dockerman]='${{ github.event.inputs.enable_dockerman }}'
             [enable_homeproxy]='${{ github.event.inputs.enable_homeproxy }}'
             [enable_original_modem]='${{ github.event.inputs.enable_original_modem }}'
             [enable_adblock]='${{ github.event.inputs.enable_adblock }}'
@@ -348,9 +334,7 @@ jobs:
           ENABLE_OPENCLASH: ${{ steps.features.outputs.enable_openclash }}
           ENABLE_NIKKI: ${{ steps.features.outputs.enable_nikki }}
           ENABLE_UPNP: ${{ steps.features.outputs.enable_upnp }}
-          ENABLE_VLMCSD: ${{ steps.features.outputs.enable_vlmcsd }}
           ENABLE_MOSDNS: ${{ steps.features.outputs.enable_mosdns }}
-          ENABLE_DOCKERMAN: ${{ steps.features.outputs.enable_dockerman }}
           ENABLE_HOMEPROXY: ${{ steps.features.outputs.enable_homeproxy }}
           ENABLE_ORIGINAL_MODEM: ${{ steps.features.outputs.enable_original_modem }}
           ENABLE_ADBLOCK: ${{ steps.features.outputs.enable_adblock }}
@@ -405,9 +389,7 @@ jobs:
             - OpenClash:   ${{ steps.features.outputs.enable_openclash }}
             - Nikki:       ${{ steps.features.outputs.enable_nikki }}
             - UPnP:        ${{ steps.features.outputs.enable_upnp }}
-            - VLMCSd:      ${{ steps.features.outputs.enable_vlmcsd }}
             - MosDNS:      ${{ steps.features.outputs.enable_mosdns }}
-            - DockerMan:   ${{ steps.features.outputs.enable_dockerman }}
             - HomeProxy:   ${{ steps.features.outputs.enable_homeproxy }}
             - 原版 Modem:  ${{ steps.features.outputs.enable_original_modem }}
             - QModem:      ${{ steps.features.outputs.enable_qmodem }}
