@@ -49,14 +49,14 @@ REMOVED_PKGS=(
 )
 
 # WED (Wireless Ethernet Dispatch): MediaTek NETSYS hardware path that moves
-# Ethernet <-> Wi-Fi packet forwarding off the CPU. Only used while HNAT is
-# active. Default false in this fork (2026-11-27): HNAT corrupted WAN->Wi-Fi
-# PPE entries on H5000M and ENABLE_HNAT defaults to false, so WED would only
-# add a TEST-grade driver. true = upstream behaviour (needs ENABLE_HNAT=true
-# to have any effect).
+# Ethernet <-> Wi-Fi packet forwarding off the CPU. Build-time only: true
+# compiles kmod-mtk_wed in (upstream default), but WED is only USED while
+# HNAT is active at runtime. With ENABLE_HNAT=false (default) it stays idle,
+# so keeping it compiled in costs nothing and lets HNAT be re-enabled from
+# LuCI later. false = drop WED from the image (A/B testing Wi-Fi bugs).
 # Applied in apply_wed_setting() AFTER enable_h5000m_wifi_driver_config so the
 # driver block cannot silently re-enable it, and checked after defconfig.
-ENABLE_WED="${ENABLE_WED:-false}"
+ENABLE_WED="${ENABLE_WED:-true}"
 
 # Cloudflare Tunnel client + LuCI panel (immortalwrt packages/luci feeds:
 # net/cloudflared, applications/luci-app-cloudflared). /etc/config/cloudflared
@@ -126,7 +126,7 @@ Options:
 
 Feature switches are controlled by environment variables, for example:
   ENABLE_MOSDNS=false ENABLE_ORIGINAL_MODEM=true ENABLE_ADBLOCK=true THREADS=8 scripts/local-build.sh
-  ENABLE_WED=true ENABLE_HNAT=true LAN_IP=192.168.1.1 scripts/local-build.sh
+  ENABLE_WED=false LAN_IP=192.168.1.1 scripts/local-build.sh
   ENABLE_CLOUDFLARED=false ENABLE_HNAT=true scripts/local-build.sh
 
 Default feature switches match the scheduled GitHub Actions build.

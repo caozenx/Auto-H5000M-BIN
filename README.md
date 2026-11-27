@@ -53,7 +53,7 @@
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `ENABLE_WED` | `false` | MTK Wi-Fi 硬件转发加速（编译期，决定是否编入 `kmod-mtk_wed`），见下文 [WED](#wed-是什么开还是关) |
+| `ENABLE_WED` | `true` | MTK Wi-Fi 硬件转发加速（编译期，只决定是否编入 `kmod-mtk_wed`；HNAT 关着时不使用），见下文 [WED](#wed-是什么开还是关) |
 | `ENABLE_HNAT` | `false` | 刷机后 TurboACC 是否默认开 MediaTek HNAT。`false` = 打包 `zz-h5000m-turboacc`，首启设 `fastpath=none`、`fullcone=0`（包仍在，LuCI 可手动打开），见 [HNAT 已知问题](#hnat--wed-已知问题连接中途卡死) |
 | `ENABLE_CLOUDFLARED` | `true` | Cloudflare Tunnel：`cloudflared` + `luci-app-cloudflared` + 中文包（immortalwrt 官方 feed）。feed 里的 `cloudflared` 是 `2025.5.0`（`openwrt-24.10` 分支，2026-11-27 查），比官方发布旧；`/etc/config/cloudflared`（含 token）随保留配置升级保留 |
 | `LAN_IP` | `192.168.100.1` | 默认 LAN 地址 |
@@ -83,14 +83,14 @@
 
 **WED（Wireless Ethernet Dispatch）** 是 MediaTek NETSYS 里的一块硬件：开启后，有线 ↔ Wi-Fi 之间的转发由硬件（配合 HNAT / PPE）直接完成，不再经过 CPU。
 
-| | 开启 | 关闭（默认） |
+| | 编入（默认） | 不编入 |
 | --- | --- | --- |
 | Wi-Fi 吞吐 | 最高 | 受 CPU（4 × Cortex-A53）限制，高带宽时下降 |
 | CPU 占用 | 低 | Wi-Fi 大流量时明显升高 |
 | 数据通路 | 硬件转发，问题较难排查 | 全走内核，便于抓包、排查 |
 | 风险 | 原仓库提到个别环境重启后进入死循环（未在本机复现） | 性能损失 |
 
-**本 fork 默认关闭**（2026-11-27 起）：H5000M 上 HNAT 写错发往 Wi-Fi 的转发条目（见下文），而 WED 只在 HNAT 开启时才被用到；默认已关 HNAT，带上 WED 没有收益，反而多一个 TEST 版驱动（`kmod-mtk_wed 6.6.94.TEST-r1`）。需要 Wi-Fi 硬件转发时用 `ENABLE_WED=true ENABLE_HNAT=true` 编一版。`ENABLE_WED=false` 的完整固件**尚未编译和实机验证**。
+**默认编入，但编入不等于启用**：WED 只在运行时 HNAT 开启（TurboACC `fastpath=mediatek_hnat`）时才实际转发流量。本 fork 默认 `ENABLE_HNAT=false`，WED 编进去也处于闲置状态，以后想在 LuCI 里重新打开 HNAT 时不用重刷固件。只有排查 Wi-Fi 问题、想彻底去掉 WED 时才用 `ENABLE_WED=false` 编一版（该组合的完整固件尚未实机验证）。
 
 > `ENABLE_WED` 是**编译期**开关，只决定固件里有没有 WED；真正让流量走硬件的是**运行时**的 TurboACC（`fastpath=mediatek_hnat`）。WED 只在 HNAT 开启时起作用，`ENABLE_HNAT=false`（默认）时 WED 编进去也不会被用上。由于下面的问题，本 fork 默认关 HNAT。
 
@@ -201,7 +201,7 @@ THREADS=8 bash scripts/local-build.sh
 ```
 
 ```bash
-ENABLE_WED=true LAN_IP=192.168.1.1 bash scripts/local-build.sh
+ENABLE_WED=false LAN_IP=192.168.1.1 bash scripts/local-build.sh
 ```
 
 只验证配置（拉源码、feeds、补丁、defconfig 和包校验，不编译）：
@@ -218,7 +218,7 @@ bash scripts/local-build.sh --config-only
 ```
 
 ```powershell
-$env:ENABLE_WED = 'true'; $env:LAN_IP = '192.168.1.1'
+$env:ENABLE_WED = 'false'; $env:LAN_IP = '192.168.1.1'
 .\scripts\local-build.ps1
 ```
 
@@ -245,7 +245,7 @@ bash scripts/coverage-test.sh quick
 PROFILE_SET=full bash scripts/coverage-test.sh
 ```
 
-`quick` = 默认配置 + 代理栈；`full` 额外覆盖最小系统、HomeProxy / MosDNS / Nikki 单独、原版 modem、QModem（next / lua）、**WED 开启**（`wed-on`）、**Cloudflared 关 + HNAT 默认开**（`cloudflared-off`）、Adblock、可选服务、全兼容插件。覆盖测试能降低回归风险，但不能代替刷机后的实机验证。
+`quick` = 默认配置 + 代理栈；`full` 额外覆盖最小系统、HomeProxy / MosDNS / Nikki 单独、原版 modem、QModem（next / lua）、**WED 不编入**（`wed-off`）、**Cloudflared 关 + HNAT 默认开**（`cloudflared-off`）、Adblock、可选服务、全兼容插件。覆盖测试能降低回归风险，但不能代替刷机后的实机验证。
 
 ---
 

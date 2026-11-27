@@ -74,9 +74,9 @@ on:
         default: true
         type: boolean
       enable_wed:
-        description: '编入 WED（MTK Wi-Fi 硬件转发，默认关闭；仅在 HNAT 开启时起作用）'
+        description: '编入 WED（MTK Wi-Fi 硬件转发驱动，默认编入；只有 HNAT 开启时才实际使用）'
         required: false
-        default: false
+        default: true
         type: boolean
       enable_cloudflared:
         description: '启用 Cloudflare Tunnel（cloudflared + luci-app-cloudflared）'
@@ -158,7 +158,7 @@ jobs:
             [enable_upnp]=true [enable_mosdns]=true
             [enable_homeproxy]=false [enable_original_modem]=false [enable_adblock]=true
             [enable_qmodem]=true [enable_qmodem_next]=true [enable_qmodem_lua]=false
-            [enable_wed]=false [enable_cloudflared]=true [enable_hnat]=false [lan_ip]=192.168.100.1
+            [enable_wed]=true [enable_cloudflared]=true [enable_hnat]=false [lan_ip]=192.168.100.1
             [publish_release]=true [run_config_coverage]=false [coverage_profile_set]=quick
             [full_build_smoke_profile]=''
           )
@@ -244,7 +244,7 @@ jobs:
             [enable_upnp]=true [enable_mosdns]=true
             [enable_homeproxy]=false [enable_original_modem]=false [enable_adblock]=true
             [enable_qmodem]=true [enable_qmodem_next]=true [enable_qmodem_lua]=false
-            [enable_wed]=false [enable_cloudflared]=true [enable_hnat]=false [lan_ip]=192.168.100.1
+            [enable_wed]=true [enable_cloudflared]=true [enable_hnat]=false [lan_ip]=192.168.100.1
             [publish_release]=true
           )
           declare -A inputs=(
