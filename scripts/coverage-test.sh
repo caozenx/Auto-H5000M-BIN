@@ -57,6 +57,8 @@ base_env=(
   ENABLE_QMODEM_NEXT=true
   ENABLE_QMODEM_LUA=false
   ENABLE_WED=true
+  ENABLE_CLOUDFLARED=true
+  ENABLE_HNAT=false
   LAN_IP=192.168.100.1
 )
 
@@ -139,6 +141,10 @@ run_named_profile() {
       run_profile wed-off "$mode" \
         ENABLE_WED=false
       ;;
+    cloudflared-off)
+      run_profile cloudflared-off "$mode" \
+        ENABLE_CLOUDFLARED=false ENABLE_HNAT=true
+      ;;
     adblock)
       run_profile adblock "$mode" \
         ENABLE_NIKKI=false ENABLE_MOSDNS=false ENABLE_ADBLOCK=true
@@ -169,7 +175,7 @@ profiles_for_set() {
       printf '%s\n' default proxy-stack
       ;;
     full)
-      printf '%s\n' default minimal proxy-stack homeproxy-only mosdns-only nikki-only original-modem qmodem qmodem-lua wed-off adblock optional-services all-compatible dockerman
+      printf '%s\n' default minimal proxy-stack homeproxy-only mosdns-only nikki-only original-modem qmodem qmodem-lua wed-off cloudflared-off adblock optional-services all-compatible dockerman
       ;;
     *)
       echo "Unknown PROFILE_SET: $PROFILE_SET" >&2

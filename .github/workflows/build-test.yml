@@ -88,6 +88,16 @@ on:
         required: false
         default: true
         type: boolean
+      enable_cloudflared:
+        description: '启用 Cloudflare Tunnel（cloudflared + luci-app-cloudflared）'
+        required: false
+        default: true
+        type: boolean
+      enable_hnat:
+        description: '刷机后默认开启 MediaTek HNAT（默认关闭：H5000M 上 HNAT 会写错 WAN→Wi-Fi 转发条目，导致连接中途卡死）'
+        required: false
+        default: false
+        type: boolean
       lan_ip:
         description: '默认 LAN 地址（仅影响全新刷机/恢复出厂，保留配置升级不受影响）'
         required: false
@@ -158,7 +168,7 @@ jobs:
             [enable_upnp]=true [enable_vlmcsd]=false [enable_mosdns]=true [enable_dockerman]=false
             [enable_homeproxy]=false [enable_original_modem]=false [enable_adblock]=true
             [enable_qmodem]=true [enable_qmodem_next]=true [enable_qmodem_lua]=false
-            [enable_wed]=true [lan_ip]=192.168.100.1
+            [enable_wed]=true [enable_cloudflared]=true [enable_hnat]=false [lan_ip]=192.168.100.1
             [publish_release]=true [run_config_coverage]=false [coverage_profile_set]=quick
             [full_build_smoke_profile]=''
           )
@@ -177,6 +187,8 @@ jobs:
             [enable_qmodem_next]='${{ github.event.inputs.enable_qmodem_next }}'
             [enable_qmodem_lua]='${{ github.event.inputs.enable_qmodem_lua }}'
             [enable_wed]='${{ github.event.inputs.enable_wed }}'
+            [enable_cloudflared]='${{ github.event.inputs.enable_cloudflared }}'
+            [enable_hnat]='${{ github.event.inputs.enable_hnat }}'
             [lan_ip]='${{ github.event.inputs.lan_ip }}'
             [publish_release]='${{ github.event.inputs.publish_release }}'
             [run_config_coverage]='${{ github.event.inputs.run_config_coverage }}'
@@ -244,7 +256,7 @@ jobs:
             [enable_upnp]=true [enable_vlmcsd]=false [enable_mosdns]=true [enable_dockerman]=false
             [enable_homeproxy]=false [enable_original_modem]=false [enable_adblock]=true
             [enable_qmodem]=true [enable_qmodem_next]=true [enable_qmodem_lua]=false
-            [enable_wed]=true [lan_ip]=192.168.100.1
+            [enable_wed]=true [enable_cloudflared]=true [enable_hnat]=false [lan_ip]=192.168.100.1
             [publish_release]=true
           )
           declare -A inputs=(
@@ -262,6 +274,8 @@ jobs:
             [enable_qmodem_next]='${{ github.event.inputs.enable_qmodem_next }}'
             [enable_qmodem_lua]='${{ github.event.inputs.enable_qmodem_lua }}'
             [enable_wed]='${{ github.event.inputs.enable_wed }}'
+            [enable_cloudflared]='${{ github.event.inputs.enable_cloudflared }}'
+            [enable_hnat]='${{ github.event.inputs.enable_hnat }}'
             [lan_ip]='${{ github.event.inputs.lan_ip }}'
             [publish_release]='${{ github.event.inputs.publish_release }}'
           )
@@ -344,6 +358,8 @@ jobs:
           ENABLE_QMODEM_NEXT: ${{ steps.features.outputs.enable_qmodem_next }}
           ENABLE_QMODEM_LUA: ${{ steps.features.outputs.enable_qmodem_lua }}
           ENABLE_WED: ${{ steps.features.outputs.enable_wed }}
+          ENABLE_CLOUDFLARED: ${{ steps.features.outputs.enable_cloudflared }}
+          ENABLE_HNAT: ${{ steps.features.outputs.enable_hnat }}
           LAN_IP: ${{ steps.features.outputs.lan_ip }}
         run: |
           set -euo pipefail
@@ -399,6 +415,8 @@ jobs:
               - QModem-Lua:  ${{ steps.features.outputs.enable_qmodem_lua }}
             - Adblock:     ${{ steps.features.outputs.enable_adblock }}
             - WED:         ${{ steps.features.outputs.enable_wed }}
+            - Cloudflared: ${{ steps.features.outputs.enable_cloudflared }}
+            - HNAT 默认开: ${{ steps.features.outputs.enable_hnat }}
             - 默认 LAN:    ${{ steps.features.outputs.lan_ip }}
 
             ⚠️ 只刷 `*-hiveton-h5000m-squashfs-sysupgrade.bin`（升级）或 `*-initramfs-kernel.bin`（U-Boot 恢复）。

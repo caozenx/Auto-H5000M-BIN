@@ -53,7 +53,9 @@
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `ENABLE_WED` | `true` | MTK Wi-Fi 硬件转发加速，见下文 [WED](#wed-是什么开还是关) |
+| `ENABLE_WED` | `true` | MTK Wi-Fi 硬件转发加速（编译期，决定是否编入 `kmod-mtk_wed`），见下文 [WED](#wed-是什么开还是关) |
+| `ENABLE_HNAT` | `false` | 刷机后 TurboACC 是否默认开 MediaTek HNAT。`false` = 打包 `zz-h5000m-turboacc`，首启设 `fastpath=none`、`fullcone=0`（包仍在，LuCI 可手动打开），见 [HNAT 已知问题](#hnat--wed-已知问题连接中途卡死) |
+| `ENABLE_CLOUDFLARED` | `true` | Cloudflare Tunnel：`cloudflared` + `luci-app-cloudflared` + 中文包（immortalwrt 官方 feed）。feed 里的 `cloudflared` 是 `2025.5.0`（`openwrt-24.10` 分支，2026-11-27 查），比官方发布旧；`/etc/config/cloudflared`（含 token）随保留配置升级保留 |
 | `LAN_IP` | `192.168.100.1` | 默认 LAN 地址 |
 | `ENABLE_QMODEM` | `true` | [FUjr/QModem](https://github.com/FUjr/QModem) 5G 模组管理（Quectel / Fibocom / MEIG / SIMCom） |
 | `ENABLE_QMODEM_NEXT` | `true` | QModem 新版 JS 界面 `luci-app-qmodem-next`（与 Lua 版互斥） |
@@ -92,6 +94,48 @@
 
 **建议保持开启**，只在遇到 Wi-Fi 稳定性问题、需要对照排查时临时用 `ENABLE_WED=false` 编一版测试。
 
+> `ENABLE_WED` 是**编译期**开关，只决定固件里有没有 WED；真正让流量走硬件的是**运行时**的 TurboACC（`fastpath=mediatek_hnat`）。WED 只在 HNAT 开启时起作用，`ENABLE_HNAT=false`（默认）时 WED 编进去也不会被用上。由于下面的问题，本 fork 默认关 HNAT。
+
+## HNAT / WED 已知问题：连接中途卡死
+
+2026-11-27 在 H5000M（ImmortalWrt 24.10-SNAPSHOT r33418，`kmod-mtk_wed 6.6.94.TEST-r1`，TurboACC `fastpath=mediatek_hnat`、`bind_rate=30`、`ppenum=2`）上实测。
+
+**现象**：iPhone / iPad / Mac 等 Wi-Fi 终端打开网页或 App 页面，第一次要等很久，甚至请求失败，刷新就好。Steam 商店首次打开时，`shared.fastly.steamstatic.com` 的 30 张图全部卡住（约 5.9 s 后报错），刷新后 157 张全部成功。
+
+**根因**：连接的收包速率超过 `bind_rate`（30 包/秒）后，HNAT 把它交给硬件 PPE 转发。**部分 WAN→LAN（下行）条目写错了**，之后的下行包全被硬件丢掉，内核和 tcpdump 都看不到。客户端表现为连接建立、收了约 32 KB 后不再有数据，要等应用超时重连。
+
+`/sys/kernel/debug/hnat/hnat_entry` 里 PPE1 的条目：
+
+| 条目 | 改写结果 |
+| --- | --- |
+| 正确 | `213.156.140.136:443->WAN:49808 => 213.156.140.136:443->192.168.100.150:49808` |
+| 坏 ① | `199.232.211.52:443->WAN:57215 => 36.3.72.0:57540->63.5.14.59:56831`（乱码地址，多条坏条目是同一串） |
+| 坏 ② | `199.232.215.52:443->WAN:57185 => 199.232.215.52:443->WAN:57185`（没改写回内网） |
+
+**证据**（8 并发、每次新建连接，下载 Fastly 上一张 1.3 MB 的图）：
+
+| 测试 | 结果 |
+| --- | --- |
+| 有线 PVE，HNAT 开，60 次 | 0 次卡死，最长 2.2 s |
+| Wi-Fi Mac，HNAT 开，4 轮 × 60 次 | 4 / 2 / 2 / 5 次卡死（都停在约 32–49 KB，12 s 超时） |
+| Wi-Fi Mac 40 次，同时读 `hnat_entry` | 2 次卡死（本地端口 57185 / 57215），**正好对应 2 条坏条目** |
+| Wi-Fi Mac，HNAT 关（先 `hook_toggle=0` 3 轮，再持久关闭后 4 轮，共 7 × 60 次） | **0 次 12 s 卡死**，平均从 2.4–2.8 s 降到 1.7–1.9 s（重启后约 1 分钟那轮有 4 次 5–8.7 s 的慢请求） |
+| 有线 PVE 4 路下载 15 s | HNAT 开 538 Mbit/s、CPU 2%；HNAT 关 539 Mbit/s、CPU 平均 16%（单核最高 21%） |
+
+**结论**：关掉 HNAT 后卡死消失，吞吐不变（这条 1G 宽带上 4 核 A53 只用到约 16% CPU）。有线 0 次卡死，坏条目只出现在 Wi-Fi 方向，**推测**问题在 WED 路径，未证实；`ENABLE_WED=false` + HNAT 开是否就正常，**未测试**。
+
+**规避**：
+
+| 方式 | 做法 |
+| --- | --- |
+| 本 fork 默认 | `ENABLE_HNAT=false`：首启 `fastpath=none`、`fullcone=0` |
+| 现有固件 | LuCI → 网络 → TurboACC → Fastpath engine 选 `Disable`，保存应用（**有人在场**） |
+| 临时验证 | `echo 0 > /sys/kernel/debug/hnat/hook_toggle`（不持久，重启恢复） |
+
+> ⚠️ **不要在 HNAT 已关时执行 `/etc/init.d/turboacc restart`**。旧版 turboacc 的 `start_service` 会先写 `hook_toggle=0` 再写 `1`、最后再写 `0`；中间那次重新打开 HNAT 导致驱动报 `hnat_set_wdma_pse_port_state() is null`，**Wi-Fi 消失、全网断网，只能断电恢复**（2026-11-27 实测）。上游新版 turboacc 已经去掉了这段"先开再关"的逻辑，但仍建议只通过 LuCI 修改。
+
+> 上游 `uci-defaults/turboacc` 在每次刷机首启时都会设 `fastpath=mediatek_hnat`，并按内核模块开 fullcone（`1` 或 `2`）。`uci-defaults` 在保留配置升级时**也会执行**，所以不改的话，每次刷完 HNAT 都会被重新打开。本 fork 的 `zz-h5000m-turboacc` 按文件名排在它后面执行，把这两项改回关闭。
+
 > 原仓库的"关闭 WED"写在 `h5000m.extra.config` 里，但会被后面的驱动配置重新打开，并且后面的校验还强制要求 WED 存在，所以**从未生效**（发布的固件里 `kmod-mtk_wed=y`）。本 fork 改为由 `ENABLE_WED` 统一控制：在驱动配置之后执行 `apply_wed_setting()`，并在 `make defconfig` 后、固件清单里双向校验（要开必须有，要关必须没有）。
 
 ---
@@ -121,6 +165,8 @@
 | `patches/mtk-hnat-local-dest.patch` | `mtk_hnat` 不卸载目的地址为本机的流量，修复开启 HNAT 后 Wi-Fi 客户端访问路由器后台异常 |
 | `set_default_lan_ip()` | 把上游 `config_generate` 里的默认 `192.168.6.1` 改为 `LAN_IP`，并校验地址格式 |
 | `apply_wed_setting()` | 见上文 WED |
+| `apply_hnat_default()` | `ENABLE_HNAT=false` 时生成 `files/etc/uci-defaults/zz-h5000m-turboacc`（`fastpath=none`、`fullcone=0`），见 [HNAT 已知问题](#hnat--wed-已知问题连接中途卡死) |
+| Cloudflared | `ENABLE_CLOUDFLARED` 控制 `cloudflared` / `luci-app-cloudflared` / 中文包；defconfig 后和固件清单都做双向校验 |
 | ModemManager | 见上文 5G 模组 |
 | 发布产物 | 只发布 `*hiveton-h5000m*`，不再附带 MT7981 / MT7986 的 bl2 |
 | `show_features()` | 修复 heredoc 未闭合：原来会把 `resolve_modem_stack()` 整个吞进打印文本，导致"QModem 与原版 Modem 互斥"的检查从未执行 |
@@ -200,7 +246,7 @@ bash scripts/coverage-test.sh quick
 PROFILE_SET=full bash scripts/coverage-test.sh
 ```
 
-`quick` = 默认配置 + 代理栈；`full` 额外覆盖最小系统、HomeProxy / MosDNS / Nikki 单独、原版 modem、QModem（next / lua）、**WED 关闭**、Adblock、可选服务、全兼容插件、DockerMan。覆盖测试能降低回归风险，但不能代替刷机后的实机验证。
+`quick` = 默认配置 + 代理栈；`full` 额外覆盖最小系统、HomeProxy / MosDNS / Nikki 单独、原版 modem、QModem（next / lua）、**WED 关闭**、**Cloudflared 关 + HNAT 默认开**（`cloudflared-off`）、Adblock、可选服务、全兼容插件、DockerMan。覆盖测试能降低回归风险，但不能代替刷机后的实机验证。
 
 ---
 
@@ -211,6 +257,7 @@ PROFILE_SET=full bash scripts/coverage-test.sh
 | **Wi-Fi 必须用纯 WPA2（`psk2`）** | 该闭源驱动在 WPA2/WPA3 混合模式（`sae-mixed`）下，发往 Wi-Fi 终端的组播 / 广播全部丢失：IPv6 邻居发现失败、网页首次打开慢、mDNS / AirPlay / HomeKit 发现异常。改成 `psk2` 后恢复。改加密后 Apple 设备需"忽略此网络"再重连 |
 | **改 Wi-Fi 不要用无参数 `wifi`** | 两个频段整体重启时切换加密方式，曾导致驱动卡死、全网断网，只能断电恢复。请在 LuCI 里改，或 `uci commit wireless; wifi reload`（只重载改动的射频） |
 | Apple Mac 收不到 WMM UP 2 帧 | DSCP 16–23（CS2 / AF21–23）发往 Mac 的帧全部丢失；dropbear 的 SSH 用 AF21，所以 Mac 直连路由器 SSH 会超时。原因在闭源驱动内，未解决。规避：经有线主机跳板，或在路由器上把发往 Wi-Fi 的 DSCP 16–23 改写为 0 |
+| **MediaTek HNAT 让 Wi-Fi 连接中途卡死** | 部分下行硬件转发条目写错，表现为"首次打开慢 / 失败，刷新就好"。默认 `ENABLE_HNAT=false`，详见 [HNAT 已知问题](#hnat--wed-已知问题连接中途卡死) |
 | `h5000m.extra.config` 里的死锁自动重启配置无效 | `CONFIG_KERNEL_*_PANIC=y`、`CONFIG_CMDLINE="panic=10"` 在 OpenWrt 的配置系统里不存在，`make defconfig` 会静默丢弃；实际只编进了软 / 硬死锁和 hung task **检测器**，不会自动重启（panic 后的重启由 `kernel.panic=3` 负责）。需要的话应改为运行时 sysctl |
 | 闭源驱动 | 驱动与芯片固件随上游 padavanonly 更新；Wi-Fi 相关问题只能等上游或换开源 mt76（主线 OpenWrt 已支持 H5000M，但目前有 Wi-Fi NAT 吞吐偏低的报告） |
 | 默认 UPnP 开启 | WAN 有公网 IP 时注意；不需要可用 `ENABLE_UPNP=false` |

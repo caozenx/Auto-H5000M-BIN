@@ -50,6 +50,21 @@ ENABLE_ADBLOCK="${ENABLE_ADBLOCK:-true}"
 # driver block cannot silently re-enable it, and checked after defconfig.
 ENABLE_WED="${ENABLE_WED:-true}"
 
+# Cloudflare Tunnel client + LuCI panel (immortalwrt packages/luci feeds:
+# net/cloudflared, applications/luci-app-cloudflared). /etc/config/cloudflared
+# is a conffile, so a keep-settings sysupgrade keeps the tunnel token.
+ENABLE_CLOUDFLARED="${ENABLE_CLOUDFLARED:-true}"
+
+# Runtime default of TurboACC's fastpath on first boot after flashing.
+# Upstream uci-defaults/turboacc sets fastpath=mediatek_hnat and turns on
+# fullcone. On H5000M (2026-11-27, see README "HNAT 已知问题") HNAT wrote
+# corrupted PPE FOE entries for WAN->Wi-Fi flows: TCP stalls after ~32 KB,
+# "first load fails, refresh works". false = ship zz-h5000m-turboacc that
+# sets fastpath=none + fullcone=0 (packages stay installed, LuCI can turn it
+# back on). true = keep upstream behaviour. Note: uci-defaults run on every
+# flash, including keep-settings sysupgrade, so this re-applies on each flash.
+ENABLE_HNAT="${ENABLE_HNAT:-false}"
+
 # Default LAN address written into package/base-files/files/bin/config_generate.
 # Only affects a fresh flash / factory reset; sysupgrade with "keep settings"
 # keeps the existing /etc/config/network. Upstream default is 192.168.6.1.
@@ -104,6 +119,7 @@ Options:
 Feature switches are controlled by environment variables, for example:
   ENABLE_MOSDNS=false ENABLE_ORIGINAL_MODEM=true ENABLE_ADBLOCK=true THREADS=8 scripts/local-build.sh
   ENABLE_WED=false LAN_IP=192.168.1.1 scripts/local-build.sh
+  ENABLE_CLOUDFLARED=false ENABLE_HNAT=true scripts/local-build.sh
 
 Default feature switches match the scheduled GitHub Actions build.
 EOF
@@ -385,6 +401,8 @@ QModem=${ENABLE_QMODEM}
 QModem-Next=${ENABLE_QMODEM_NEXT}
 QModem-Lua=${ENABLE_QMODEM_LUA}
 WED=${ENABLE_WED}
+Cloudflared=${ENABLE_CLOUDFLARED}
+HNAT default on=${ENABLE_HNAT}
 LAN_IP=${LAN_IP}
 GOPROXY=${GOPROXY}
 GOSUMDB=${GOSUMDB}
@@ -1083,6 +1101,7 @@ apply_package_fixes() {
   verify_mtwifi_patch
   patch_mtk_hnat_local_dest
   set_default_lan_ip
+  apply_hnat_default
   patch_mtwifi7_sta_mgmt_assoc_hostapd_guard
   ensure_external_luci_i18n_packages
   if is_true "$ENABLE_QMODEM"; then
@@ -1308,6 +1327,11 @@ export MIHOMO_TCP_KEEPALIVE="1"\
   if is_true "$ENABLE_ADBLOCK"; then
     feed_install_pkg adblock
     feed_install_pkg luci-app-adblock
+  fi
+
+  if is_true "$ENABLE_CLOUDFLARED"; then
+    feed_install_pkg cloudflared
+    feed_install_pkg luci-app-cloudflared
   fi
 
   if is_true "$ENABLE_QMODEM"; then
@@ -2074,6 +2098,11 @@ EOF
   if is_true "$ENABLE_ADBLOCK"; then
     enable_adblock_stack_config
   fi
+  if is_true "$ENABLE_CLOUDFLARED"; then
+    enable_cloudflared_config
+  else
+    disabled_pkgs+=("cloudflared" "luci-app-cloudflared" "luci-i18n-cloudflared-zh-cn")
+  fi
   # adbyby-plus removed; upstream adblock (see enable_adblock_stack_config) covers ad-blocking
 
   if is_true "$ENABLE_DOCKERMAN"; then
@@ -2155,6 +2184,10 @@ EOF
     config_enable PACKAGE_luci-i18n-vlmcsd-zh-cn
   fi
 
+  if is_true "$ENABLE_CLOUDFLARED"; then
+    enable_cloudflared_config
+  fi
+
   run_with_timeout "$CONFIG_TIMEOUT" "make defconfig" make FORCE=1 defconfig -j"${THREADS}"
   retry_upnp_config_if_needed
 
@@ -2231,6 +2264,13 @@ EOF
   verify_enabled_pkg "HomeProxy zh-cn" "luci-i18n-homeproxy-zh-cn" "$ENABLE_HOMEPROXY"
   verify_enabled_pkg "HomeProxy sing-box" "sing-box" "$ENABLE_HOMEPROXY"
   verify_enabled_pkg "HomeProxy nft tproxy" "kmod-nft-tproxy" "$ENABLE_HOMEPROXY"
+  verify_enabled_pkg "Cloudflared" "cloudflared" "$ENABLE_CLOUDFLARED"
+  verify_enabled_pkg "Cloudflared LuCI" "luci-app-cloudflared" "$ENABLE_CLOUDFLARED"
+  verify_enabled_pkg "Cloudflared zh-cn" "luci-i18n-cloudflared-zh-cn" "$ENABLE_CLOUDFLARED"
+  if ! is_true "$ENABLE_CLOUDFLARED"; then
+    verify_disabled_pkg "Cloudflared (ENABLE_CLOUDFLARED=false)" "cloudflared"
+    verify_disabled_pkg "Cloudflared LuCI (ENABLE_CLOUDFLARED=false)" "luci-app-cloudflared"
+  fi
   verify_enabled_pkg "Adblock" "adblock" "$ENABLE_ADBLOCK"
   verify_enabled_pkg "Adblock LuCI" "luci-app-adblock" "$ENABLE_ADBLOCK"
   verify_enabled_pkg "Adblock zh-cn" "luci-i18n-adblock-zh-cn" "$ENABLE_ADBLOCK"
@@ -2322,6 +2362,42 @@ verify_disabled_symbol() {
     grep -n "CONFIG_${symbol}" .config || true
     exit 1
   fi
+}
+
+enable_cloudflared_config() {
+  config_enable PACKAGE_cloudflared
+  config_enable PACKAGE_luci-app-cloudflared
+  config_enable PACKAGE_luci-i18n-cloudflared-zh-cn
+  config_enable PACKAGE_ca-bundle
+}
+
+# Install files/etc/uci-defaults/zz-h5000m-turboacc into the image (OpenWrt
+# copies $(TOPDIR)/files into rootfs). The "zz-" prefix makes it sort after
+# upstream's uci-defaults/turboacc ("t" < "z"), so it overrides it; a "99-"
+# prefix would sort BEFORE "turboacc" and be overwritten.
+apply_hnat_default() {
+  local dir="files/etc/uci-defaults"
+  local f="$dir/zz-h5000m-turboacc"
+  if is_true "$ENABLE_HNAT"; then
+    rm -f "$f"
+    log "ENABLE_HNAT=true: keeping upstream TurboACC default (fastpath=mediatek_hnat)"
+    return 0
+  fi
+  log "ENABLE_HNAT=false: shipping $f (fastpath=none, fullcone=0)"
+  mkdir -p "$dir"
+  cat > "$f" <<'EOF'
+#!/bin/sh
+# Auto-H5000M-BIN (ENABLE_HNAT=false): MediaTek HNAT corrupts WAN->Wi-Fi PPE
+# entries on H5000M (TCP stalls mid-transfer). Ship with acceleration off.
+# Re-enable in LuCI -> Network -> TurboACC if wanted.
+uci -q get turboacc.config >/dev/null || uci -q set turboacc.config=turboacc
+uci -q set turboacc.config.fastpath='none'
+uci -q set turboacc.config.fullcone='0'
+uci -q commit turboacc
+exit 0
+EOF
+  chmod 0755 "$f"
+  grep -q "fastpath='none'" "$f" || die "HNAT default file verification failed ($f)"
 }
 
 apply_wed_setting() {
@@ -2512,6 +2588,14 @@ collect_artifacts() {
 
   if is_true "$ENABLE_ADGUARDHOME" && ! grep -q '^luci-i18n-adguardhome-zh-cn[[:space:]-]' "$ARTIFACTS_DIR/openwrt-image.manifest"; then
     die "Firmware image manifest is missing required package: luci-i18n-adguardhome-zh-cn"
+  fi
+  if is_true "$ENABLE_CLOUDFLARED"; then
+    for image_pkg in cloudflared luci-app-cloudflared; do
+      grep -q "^${image_pkg}[[:space:]-]" "$ARTIFACTS_DIR/openwrt-image.manifest" || \
+        die "Firmware image manifest is missing required package: ${image_pkg} (ENABLE_CLOUDFLARED=true)"
+    done
+  elif grep -q '^cloudflared[[:space:]-]' "$ARTIFACTS_DIR/openwrt-image.manifest"; then
+    die "Firmware image manifest still contains cloudflared although ENABLE_CLOUDFLARED=false"
   fi
   if is_true "$ENABLE_ADBLOCK" && ! grep -q '^adblock[[:space:]-]' "$ARTIFACTS_DIR/openwrt-image.manifest"; then
     die "Firmware image manifest is missing required package: adblock"
