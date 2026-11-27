@@ -19,7 +19,11 @@ V2DAT_TIMEOUT="${V2DAT_TIMEOUT:-3600}"
 GOPROXY="${GOPROXY:-https://goproxy.cn,https://proxy.golang.org,direct}"
 GOSUMDB="${GOSUMDB:-sum.golang.google.cn}"
 DOWNLOAD_MIRROR="${DOWNLOAD_MIRROR:-https://mirrors.tuna.tsinghua.edu.cn/openwrt/sources;https://mirrors.ustc.edu.cn/openwrt/sources;https://mirrors.bfsu.edu.cn/openwrt/sources}"
-GITHUB_PROXY_PREFIXES="${GITHUB_PROXY_PREFIXES:-https://ghfast.top/ https://gh-proxy.com/ https://gh.llkk.cc/}"
+# Third-party GitHub proxies, tried only AFTER a direct github.com download
+# fails. Unset = the defaults below (for local builds in mainland China);
+# set to an empty string to disable them (CI does this: GitHub-hosted runners
+# reach github.com directly, and proxies are an unverified middleman).
+GITHUB_PROXY_PREFIXES="${GITHUB_PROXY_PREFIXES-https://ghfast.top/ https://gh-proxy.com/ https://gh.llkk.cc/}"
 export GOPROXY
 export GOSUMDB
 export DOWNLOAD_MIRROR
@@ -31,6 +35,11 @@ HOMEPROXY_FALLBACK_REPO_URL="${HOMEPROXY_FALLBACK_REPO_URL:-https://github.com/V
 HOMEPROXY_FALLBACK_REPO_BRANCH="${HOMEPROXY_FALLBACK_REPO_BRANCH:-main}"
 ADGUARDHOME_IPK_URL="${ADGUARDHOME_IPK_URL:-https://github.com/sirpdboy/luci-app-adguardhome/releases/download/v1.1.1/luci-app-adguardhome_1.1.1-r1_all.ipk}"
 ADGUARDHOME_I18N_IPK_URL="${ADGUARDHOME_I18N_IPK_URL:-https://github.com/sirpdboy/luci-app-adguardhome/releases/download/v1.1.1/luci-i18n-adguardhome-zh-cn_0_all.ipk}"
+# SHA256 of the two prebuilt ipks above (v1.1.1, fetched directly from
+# github.com on 2026-11-27). Becomes PKG_HASH, so a proxy/mirror serving a
+# different file fails the download. Update together with the URLs.
+ADGUARDHOME_IPK_SHA256="${ADGUARDHOME_IPK_SHA256:-facdc07836b21c72489b9d0f952fa3cc711cf2581b1a58cb2c7058ef84e8c80c}"
+ADGUARDHOME_I18N_IPK_SHA256="${ADGUARDHOME_I18N_IPK_SHA256:-44a0a346b00e92b9e872b345d78460a842c9a3d8ecef5c1ece5a641b410eb216}"
 
 ENABLE_ADGUARDHOME="${ENABLE_ADGUARDHOME:-false}"
 ENABLE_OPENCLASH="${ENABLE_OPENCLASH:-false}"
@@ -46,6 +55,7 @@ REMOVED_PKGS=(
   vlmcsd luci-app-vlmcsd luci-i18n-vlmcsd-zh-cn
   luci-app-dockerman luci-i18n-dockerman-zh-cn luci-lib-docker
   docker dockerd docker-compose
+  watchcat luci-app-watchcat luci-i18n-watchcat-zh-cn
 )
 
 # WED (Wireless Ethernet Dispatch): MediaTek NETSYS hardware path that moves
@@ -642,12 +652,18 @@ patch_v2ray_geodata_downloads() {
   local geodata_makefile="package/v2ray-geodata/Makefile"
   [ -f "$geodata_makefile" ] || return 0
 
-  local tmp_makefile
+  local tmp_makefile prefix geoip_proxies="" geosite_proxies=""
+  # Proxy fallbacks follow GITHUB_PROXY_PREFIXES (empty in CI = direct only).
+  for prefix in $GITHUB_PROXY_PREFIXES; do
+    [ -n "$prefix" ] || continue
+    geoip_proxies+=" ${prefix%/}/\$(GEOIP_URL)"
+    geosite_proxies+=" ${prefix%/}/\$(GEOSITE_URL)"
+  done
   tmp_makefile="$(mktemp)"
-  awk '
+  awk -v geoip_proxies="$geoip_proxies" -v geosite_proxies="$geosite_proxies" '
     /^define Build\/Compile$/ {
       print "define Build/Compile"
-      print "\t( cd $(PKG_BUILD_DIR); rm -f geoip.dat geosite.dat; download_dat() { output=\"$$$$1\"; shift; for url in \"$$$$@\"; do [ -n \"$$$$url\" ] || continue; curl -fL --retry 5 --retry-delay 2 --connect-timeout 20 \"$$$$url\" -o \"$$$$output.tmp\" && [ -s \"$$$$output.tmp\" ] && mv \"$$$$output.tmp\" \"$$$$output\" && return 0; rm -f \"$$$$output.tmp\"; done; echo \"Unable to download $$$$output\" >&2; return 1; }; download_dat geoip.dat $(GEOIP_URL) https://ghfast.top/$(GEOIP_URL) https://gh-proxy.com/$(GEOIP_URL) https://gh.llkk.cc/$(GEOIP_URL); download_dat geosite.dat $(GEOSITE_URL) https://ghfast.top/$(GEOSITE_URL) https://gh-proxy.com/$(GEOSITE_URL) https://gh.llkk.cc/$(GEOSITE_URL); [ -s geoip.dat ] && [ -s geosite.dat ]; )"
+      print "\t( cd $(PKG_BUILD_DIR); rm -f geoip.dat geosite.dat; download_dat() { output=\"$$$$1\"; shift; for url in \"$$$$@\"; do [ -n \"$$$$url\" ] || continue; curl -fL --retry 5 --retry-delay 2 --connect-timeout 20 \"$$$$url\" -o \"$$$$output.tmp\" && [ -s \"$$$$output.tmp\" ] && mv \"$$$$output.tmp\" \"$$$$output\" && return 0; rm -f \"$$$$output.tmp\"; done; echo \"Unable to download $$$$output\" >&2; return 1; }; download_dat geoip.dat $(GEOIP_URL) " geoip_proxies "; download_dat geosite.dat $(GEOSITE_URL) " geosite_proxies "; [ -s geoip.dat ] && [ -s geosite.dat ]; )"
       print "endef"
       collecting=1
       next
@@ -822,6 +838,7 @@ ensure_prebuilt_luci_i18n_package() {
   local ipk_url="$3"
   local app_dep="$4"
   local title="$5"
+  local pkg_hash="${6:?ensure_prebuilt_luci_i18n_package: SHA256 required}"
   local source_name="${ipk_url##*/}"
   local pkg_dir="package/prebuilt-i18n/$pkg_name"
   local source_urls
@@ -838,7 +855,7 @@ PKG_VERSION:=$version
 PKG_RELEASE:=1
 PKG_SOURCE:=$source_name
 PKG_SOURCE_URL:=$source_urls
-PKG_HASH:=skip
+PKG_HASH:=$pkg_hash
 PKG_BUILD_DIR:=\$(BUILD_DIR)/\$(PKG_NAME)-\$(PKG_VERSION)
 
 include \$(INCLUDE_DIR)/package.mk
@@ -889,14 +906,14 @@ EOF
 # ipk URL is treated as an upstream tarball/zip (sirpdboy/luci-app-adguardhome
 # releases serve an extra gzip-wrapped ipk whose layout matches
 # tar/debian-binary+control.tar.gz+data.tar.gz, so the same ar-or-tar branch
-# from the i18n helper is reused). PKG_HASH is skipped because the release
-# tag is the integrity anchor; if you need checksum pinning, set
-# ADGUARDHOME_IPK_SHA256SUM in the environment.
+# from the i18n helper is reused). PKG_HASH is pinned to the caller-supplied
+# SHA256 (ADGUARDHOME_IPK_SHA256 / ADGUARDHOME_I18N_IPK_SHA256).
 ensure_prebuilt_luci_app_package() {
   local pkg_name="$1"
   local version="$2"
   local ipk_url="$3"
   local title="$4"
+  local pkg_hash="${5:?ensure_prebuilt_luci_app_package: SHA256 required}"
   local source_name="${ipk_url##*/}"
   local pkg_dir="package/prebuilt-luci-app/$pkg_name"
   local source_urls
@@ -913,7 +930,7 @@ PKG_VERSION:=$version
 PKG_RELEASE:=1
 PKG_SOURCE:=$source_name
 PKG_SOURCE_URL:=$source_urls
-PKG_HASH:=skip
+PKG_HASH:=$pkg_hash
 PKG_BUILD_DIR:=\$(BUILD_DIR)/\$(PKG_NAME)-\$(PKG_VERSION)
 
 include \$(INCLUDE_DIR)/package.mk
@@ -968,13 +985,15 @@ ensure_external_luci_i18n_packages() {
       luci-app-adguardhome \
       "1.1.1-r1" \
       "$ADGUARDHOME_IPK_URL" \
-      "LuCI support for AdGuardHome"
+      "LuCI support for AdGuardHome" \
+      "$ADGUARDHOME_IPK_SHA256"
     ensure_prebuilt_luci_i18n_package \
       luci-i18n-adguardhome-zh-cn \
       "0" \
       "$ADGUARDHOME_I18N_IPK_URL" \
       luci-app-adguardhome \
-      "AdGuardHome Simplified Chinese translation"
+      "AdGuardHome Simplified Chinese translation" \
+      "$ADGUARDHOME_I18N_IPK_SHA256"
   fi
 }
 
@@ -2019,8 +2038,8 @@ EOF
   apply_wed_setting
 
   local disabled_pkgs=("luci-app-sms-tool-lite" "luci-app-3ginfo-lite")
-  # VLMCSd (KMS) and DockerMan/Docker were removed from this fork; upstream
-  # defconfig already has them "not set", keep them pinned off anyway.
+  # VLMCSd (KMS), DockerMan/Docker and watchcat were removed from this fork;
+  # keep them pinned off even if upstream defconfig or a dependency selects them.
   disabled_pkgs+=("${REMOVED_PKGS[@]}")
 
   if is_true "$ENABLE_NIKKI"; then

@@ -5,106 +5,93 @@ on:
     - cron: '0 16 * * 0'  # 每周一北京时间 00:00
   workflow_dispatch:
     inputs:
-      runner_type:
-        description: '运行器类型（github-hosted 默认；free 账户被锁时选 self-hosted 跑自己的机器）'
+      enable_hnat:
+        description: '【网络加速】刷机后默认开启 MediaTek HNAT（默认关闭：H5000M 上 HNAT 会写错 WAN→Wi-Fi 转发条目，导致连接中途卡死）'
         required: false
-        default: github-hosted
-        type: choice
-        options:
-          - github-hosted
-          - self-hosted
-      self_hosted_labels:
-        description: '自托管 runner 标签（逗号分隔；仅 runner_type=self-hosted 时生效，默认 linux,x64,h5000m）'
+        default: false
+        type: boolean
+      enable_wed:
+        description: '【网络加速】编入 WED（MTK Wi-Fi 硬件转发驱动，默认编入；只有 HNAT 开启时才实际使用）'
         required: false
-        default: 'linux,x64,h5000m'
+        default: true
+        type: boolean
+      lan_ip:
+        description: '【基础】默认 LAN 地址（仅影响全新刷机/恢复出厂，保留配置升级不受影响）'
+        required: false
+        default: '192.168.100.1'
         type: string
-      enable_adguardhome:
-        description: '启用 AdGuardHome'
+      enable_cloudflared:
+        description: '【基础】启用 Cloudflare Tunnel（cloudflared + luci-app-cloudflared）'
         required: false
-        default: false
-        type: boolean
-      enable_openclash:
-        description: '启用 OpenClash'
-        required: false
-        default: false
-        type: boolean
-      enable_nikki:
-        description: '启用 Nikki（mihomo 代理，默认关闭）'
-        required: false
-        default: false
+        default: true
         type: boolean
       enable_upnp:
-        description: '启用 UPnP'
+        description: '【基础】启用 UPnP'
         required: false
         default: true
-        type: boolean
-      enable_mosdns:
-        description: '启用 MosDNS'
-        required: false
-        default: true
-        type: boolean
-      enable_homeproxy:
-        description: '启用 HomeProxy'
-        required: false
-        default: false
-        type: boolean
-      enable_original_modem:
-        description: '启用原版 Modem（luci-app-modem + ModemManager，支持 Quectel RG501Q-EU/RM5xxQ 等 QMI 5G 模块）。与 QModem 互斥——启用 QModem 时会被自动禁用。'
-        required: false
-        default: false
         type: boolean
       enable_qmodem:
-        description: '启用 QModem (FUjr/QModem，Quectel/Fibocom/MEIG/SIMCOM 5G modem LuCI 面板，原版 luci-app-modem 不覆盖 RG501Q-EU 等专用 5G 驱动时启用。与原版 modem 互斥。'
+        description: '【5G 模组】启用 QModem (FUjr/QModem，Quectel/Fibocom/MEIG/SIMCOM 5G modem LuCI 面板，原版 luci-app-modem 不覆盖 RG501Q-EU 等专用 5G 驱动时启用。与原版 modem 互斥。'
         required: false
         default: true
         type: boolean
       enable_qmodem_next:
-        description: 'QModem 新版 JS LuCI (luci-app-qmodem-next)。默认启用；与 lua 版互斥。'
+        description: '【5G 模组】QModem 新版 JS LuCI (luci-app-qmodem-next)。默认启用；与 lua 版互斥。'
         required: false
         default: true
         type: boolean
       enable_qmodem_lua:
-        description: 'QModem 经典 Lua LuCI (luci-app-qmodem)。与 qmodem-next 互斥。'
+        description: '【5G 模组】QModem 经典 Lua LuCI (luci-app-qmodem)。与 qmodem-next 互斥。'
         required: false
         default: false
+        type: boolean
+      enable_original_modem:
+        description: '【5G 模组】启用原版 Modem（luci-app-modem + ModemManager，支持 Quectel RG501Q-EU/RM5xxQ 等 QMI 5G 模块）。与 QModem 互斥——启用 QModem 时会被自动禁用。'
+        required: false
+        default: false
+        type: boolean
+      enable_mosdns:
+        description: '【DNS 过滤】启用 MosDNS'
+        required: false
+        default: true
         type: boolean
       enable_adblock:
-        description: '启用 Adblock（DNS 层广告/恶意域名过滤，依赖 dnsmasq/unbound/smartdns）'
+        description: '【DNS 过滤】启用 Adblock（DNS 层广告/恶意域名过滤，依赖 dnsmasq/unbound/smartdns）'
         required: false
         default: true
         type: boolean
-      enable_wed:
-        description: '编入 WED（MTK Wi-Fi 硬件转发驱动，默认编入；只有 HNAT 开启时才实际使用）'
-        required: false
-        default: true
-        type: boolean
-      enable_cloudflared:
-        description: '启用 Cloudflare Tunnel（cloudflared + luci-app-cloudflared）'
-        required: false
-        default: true
-        type: boolean
-      enable_hnat:
-        description: '刷机后默认开启 MediaTek HNAT（默认关闭：H5000M 上 HNAT 会写错 WAN→Wi-Fi 转发条目，导致连接中途卡死）'
+      enable_adguardhome:
+        description: '【DNS 过滤】启用 AdGuardHome'
         required: false
         default: false
         type: boolean
-      lan_ip:
-        description: '默认 LAN 地址（仅影响全新刷机/恢复出厂，保留配置升级不受影响）'
+      enable_homeproxy:
+        description: '【代理】启用 HomeProxy'
         required: false
-        default: '192.168.100.1'
-        type: string
+        default: false
+        type: boolean
+      enable_nikki:
+        description: '【代理】启用 Nikki（mihomo 代理，默认关闭）'
+        required: false
+        default: false
+        type: boolean
+      enable_openclash:
+        description: '【代理】启用 OpenClash'
+        required: false
+        default: false
+        type: boolean
       publish_release:
-        description: '上传 Release（默认 true）'
+        description: '【发布与测试】上传 Release（默认 true）'
         required: false
         default: true
         type: boolean
       run_config_coverage:
-        description: '先运行覆盖性配置测试'
+        description: '【发布与测试】先运行覆盖性配置测试'
         required: false
         default: false
         type: boolean
       coverage_profile_set:
-        description: '覆盖性配置测试范围'
+        description: '【发布与测试】覆盖性配置测试范围'
         required: false
         default: quick
         type: choice
@@ -112,9 +99,22 @@ on:
           - quick
           - full
       full_build_smoke_profile:
-        description: '额外完整编译冒烟 profile（留空则不跑）'
+        description: '【发布与测试】额外完整编译冒烟 profile（留空则不跑）'
         required: false
         default: ''
+        type: string
+      runner_type:
+        description: '【运行环境】运行器类型（github-hosted 默认；free 账户被锁时选 self-hosted 跑自己的机器）'
+        required: false
+        default: github-hosted
+        type: choice
+        options:
+          - github-hosted
+          - self-hosted
+      self_hosted_labels:
+        description: '【运行环境】自托管 runner 标签（逗号分隔；仅 runner_type=self-hosted 时生效，默认 linux,x64,h5000m）'
+        required: false
+        default: 'linux,x64,h5000m'
         type: string
 
 concurrency:
@@ -130,10 +130,14 @@ env:
   CONFIG_URL: https://raw.githubusercontent.com/padavanonly/immortalwrt-mt798x-6.6/refs/heads/mt798x-mt799x-6.6-mtwifi/defconfig/mt7987_mt7992.config
   SOURCE_DIR: immortalwrt
   TZ: Asia/Shanghai
-  GOPROXY: https://goproxy.cn,https://proxy.golang.org,direct
-  GOSUMDB: sum.golang.google.cn
-  DOWNLOAD_MIRROR: "https://mirrors.tuna.tsinghua.edu.cn/openwrt/sources;https://mirrors.ustc.edu.cn/openwrt/sources;https://mirrors.bfsu.edu.cn/openwrt/sources"
-  GITHUB_PROXY_PREFIXES: "https://ghfast.top/ https://gh-proxy.com/ https://gh.llkk.cc/"
+  # GitHub-hosted runners are outside mainland China: use official sources
+  # and no third-party GitHub proxies (local-build.sh keeps China mirrors as
+  # its defaults for local builds).
+  GOPROXY: https://proxy.golang.org,direct
+  GOSUMDB: sum.golang.org
+  DOWNLOAD_MIRROR: "https://sources.openwrt.org"
+  GITHUB_PROXY_PREFIXES: ""
+  RELEASE_KEEP: 5
 
 jobs:
   # ─── 覆盖性配置测试（与固件编译并行，不阻塞最终 Release）─────────────────
@@ -361,8 +365,15 @@ jobs:
             echo "❌ 未找到任何产物"
             exit 1
           fi
+          # SHA256SUMS: verify after download with `sha256sum -c SHA256SUMS`
+          ( cd artifacts && rm -f SHA256SUMS && find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' | sort | xargs sha256sum > SHA256SUMS )
           ls -lh artifacts/
+          cat artifacts/SHA256SUMS
           echo "build_time=$(date '+%Y-%m-%d %H:%M:%S %Z')" >> "$GITHUB_OUTPUT"
+          # Dated tag per build, e.g. h5000m-20261130-42; older builds stay
+          # downloadable for rollback (pruned to RELEASE_KEEP below).
+          echo "release_tag=h5000m-$(date '+%Y%m%d')-${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          echo "release_date=$(date '+%Y-%m-%d')" >> "$GITHUB_OUTPUT"
 
       - name: 上传产物
         uses: actions/upload-artifact@v4
@@ -375,8 +386,8 @@ jobs:
         if: steps.features.outputs.publish_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: latest
-          name: ImmortalWrt H5000M Latest
+          tag_name: ${{ steps.artifacts.outputs.release_tag }}
+          name: ImmortalWrt H5000M ${{ steps.artifacts.outputs.release_date }} (#${{ github.run_number }})
           body: |
             🎉 **ImmortalWrt H5000M 固件已构建完成**
 
@@ -385,26 +396,35 @@ jobs:
             📦 源码: `${{ env.REPO_URL }}` @ `${{ env.REPO_BRANCH }}`
 
             **⚙️ 启用的功能:**
-            - AdGuardHome: ${{ steps.features.outputs.enable_adguardhome }}
-            - OpenClash:   ${{ steps.features.outputs.enable_openclash }}
-            - Nikki:       ${{ steps.features.outputs.enable_nikki }}
-            - UPnP:        ${{ steps.features.outputs.enable_upnp }}
-            - MosDNS:      ${{ steps.features.outputs.enable_mosdns }}
-            - HomeProxy:   ${{ steps.features.outputs.enable_homeproxy }}
-            - 原版 Modem:  ${{ steps.features.outputs.enable_original_modem }}
-            - QModem:      ${{ steps.features.outputs.enable_qmodem }}
-              - QModem-Next: ${{ steps.features.outputs.enable_qmodem_next }}
-              - QModem-Lua:  ${{ steps.features.outputs.enable_qmodem_lua }}
-            - Adblock:     ${{ steps.features.outputs.enable_adblock }}
-            - WED:         ${{ steps.features.outputs.enable_wed }}
-            - Cloudflared: ${{ steps.features.outputs.enable_cloudflared }}
-            - HNAT 默认开: ${{ steps.features.outputs.enable_hnat }}
-            - 默认 LAN:    ${{ steps.features.outputs.lan_ip }}
+            - 网络加速：HNAT 默认开 ${{ steps.features.outputs.enable_hnat }} ｜ WED 编入 ${{ steps.features.outputs.enable_wed }}
+            - 基础：默认 LAN ${{ steps.features.outputs.lan_ip }} ｜ Cloudflared ${{ steps.features.outputs.enable_cloudflared }} ｜ UPnP ${{ steps.features.outputs.enable_upnp }}
+            - 5G 模组：QModem ${{ steps.features.outputs.enable_qmodem }}（Next ${{ steps.features.outputs.enable_qmodem_next }} / Lua ${{ steps.features.outputs.enable_qmodem_lua }}）｜ 原版 Modem ${{ steps.features.outputs.enable_original_modem }}
+            - DNS 过滤：MosDNS ${{ steps.features.outputs.enable_mosdns }} ｜ Adblock ${{ steps.features.outputs.enable_adblock }} ｜ AdGuardHome ${{ steps.features.outputs.enable_adguardhome }}
+            - 代理：HomeProxy ${{ steps.features.outputs.enable_homeproxy }} ｜ Nikki ${{ steps.features.outputs.enable_nikki }} ｜ OpenClash ${{ steps.features.outputs.enable_openclash }}
 
             ⚠️ 只刷 `*-hiveton-h5000m-squashfs-sysupgrade.bin`（升级）或 `*-initramfs-kernel.bin`（U-Boot 恢复）。
+
+            🔒 下载后校验：`sha256sum -c SHA256SUMS --ignore-missing`
           prerelease: false
           make_latest: true
-          overwrite_files: true
           files: artifacts/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 清理旧 Release（保留最近 ${{ env.RELEASE_KEEP }} 个 h5000m-* 版本）
+        if: steps.features.outputs.publish_release == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Only dated h5000m-* releases are pruned; anything else (e.g. the
+          # legacy "latest" release) is left alone.
+          gh release list --repo "${{ github.repository }}" --limit 200 \
+            --json tagName,createdAt --jq '[.[] | select(.tagName | startswith("h5000m-"))] | sort_by(.createdAt) | reverse | .[].tagName' \
+            | tail -n +$(( RELEASE_KEEP + 1 )) \
+            | while read -r tag; do
+                [ -n "$tag" ] || continue
+                echo "🗑  删除旧 Release: $tag"
+                gh release delete "$tag" --repo "${{ github.repository }}" --yes --cleanup-tag
+              done

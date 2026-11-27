@@ -69,13 +69,14 @@
 | `ENABLE_OPENCLASH` | `false` | OpenClash |
 | `ENABLE_HOMEPROXY` | `false` | HomeProxy |
 
-下载加速（国内网络可按需覆盖）：
+下载源（本地编译默认用国内镜像；GitHub Actions 在 workflow 顶层 `env` 里覆盖为官方源）：
 
-| 变量 | 默认 | 说明 |
-| --- | --- | --- |
-| `GOPROXY` / `GOSUMDB` | `goproxy.cn` / `sum.golang.google.cn` | Go 依赖（MosDNS / Nikki / HomeProxy） |
-| `DOWNLOAD_MIRROR` | 清华 / 中科大 / 北外 | OpenWrt 源码包镜像 |
-| `GITHUB_PROXY_PREFIXES` | `ghfast` / `gh-proxy` / `gh.llkk` | GitHub 直连失败后的代理前缀，原始地址优先 |
+| 变量 | 本地默认 | GitHub Actions | 说明 |
+| --- | --- | --- | --- |
+| `GOPROXY` / `GOSUMDB` | `goproxy.cn` / `sum.golang.google.cn` | `proxy.golang.org` / `sum.golang.org` | Go 依赖（MosDNS / Nikki / HomeProxy / cloudflared） |
+| `DOWNLOAD_MIRROR` | 清华 / 中科大 / 北外 | `sources.openwrt.org` | OpenWrt 源码包镜像 |
+| `GITHUB_PROXY_PREFIXES` | `ghfast` / `gh-proxy` / `gh.llkk` | 空（不用代理） | GitHub 直连失败后才试的第三方代理前缀；**设为空字符串即关闭**（未设置才用默认值）。v2ray-geodata 下载也跟随这个变量 |
+| `ADGUARDHOME_IPK_SHA256` / `ADGUARDHOME_I18N_IPK_SHA256` | v1.1.1 两个 ipk 的哈希 | 同左 | 预编译 ipk 的 `PKG_HASH`，内容不符即下载失败；换版本时和 URL 一起改 |
 
 ---
 
@@ -164,9 +165,10 @@
 | `set_default_lan_ip()` | 把上游 `config_generate` 里的默认 `192.168.6.1` 改为 `LAN_IP`，并校验地址格式 |
 | `apply_wed_setting()` | 见上文 WED |
 | `apply_hnat_default()` | `ENABLE_HNAT=false` 时生成 `files/etc/uci-defaults/zz-h5000m-turboacc`（`fastpath=none`、`fullcone=0`），见 [HNAT 已知问题](#hnat--wed-已知问题连接中途卡死) |
-| 移除 VLMCSd、DockerMan / Docker | 删掉 `ENABLE_VLMCSD`、`ENABLE_DOCKERMAN` 开关；`REMOVED_PKGS`（`vlmcsd`、`luci-app-vlmcsd`、`luci-app-dockerman`、`luci-lib-docker`、`docker`、`dockerd` 等）在 defconfig 前强制关闭，defconfig 后和固件清单里校验不存在 |
+| 移除 VLMCSd、DockerMan / Docker、watchcat | 删掉 `ENABLE_VLMCSD`、`ENABLE_DOCKERMAN` 开关和 `watchcat`；`REMOVED_PKGS`（`vlmcsd`、`luci-app-vlmcsd`、`luci-app-dockerman`、`luci-lib-docker`、`docker`、`dockerd`、`watchcat` 等）在 defconfig 前强制关闭，defconfig 后和固件清单里校验不存在 |
 | Cloudflared | `ENABLE_CLOUDFLARED` 控制 `cloudflared` / `luci-app-cloudflared` / 中文包；defconfig 后和固件清单都做双向校验 |
 | ModemManager | 见上文 5G 模组 |
+| 删除无效的"死锁自动重启"配置 | 原仓库 `h5000m.extra.config` 里的 `CONFIG_CMDLINE="panic=10"`、`CONFIG_KERNEL_*_PANIC=y` 在 OpenWrt 配置系统中不存在，`make defconfig` 会静默丢弃，从未生效；连同相关检测器选项一起删掉，避免误以为卡死会自动重启（实际由 `kernel.panic=3` 只处理 panic） |
 | 发布产物 | 只发布 `*hiveton-h5000m*`，不再附带 MT7981 / MT7986 的 bl2 |
 | `show_features()` | 修复 heredoc 未闭合：原来会把 `resolve_modem_stack()` 整个吞进打印文本，导致"QModem 与原版 Modem 互斥"的检查从未执行 |
 | 其他 | QMI WWAN 驱动适配 Linux 6.6；Go feed 固定 `sbwml/packages_lang_golang -b 24.x`；`mihomo-meta` 冲突剥离；补齐 IPv6 netfilter（ip6tables / NAT6）；UPnP 显式选 `miniupnpd-nftables`；Adblock 运行时依赖显式声明 |
@@ -177,7 +179,9 @@
 
 - 触发：每周日 16:00 UTC（北京时间周一 00:00）定时构建；或在 Actions 页面手动 `Run workflow`。
 - 手动触发时所有开关（含 `enable_wed`、`lan_ip`）都可单独设置；不勾 `publish_release` 则只上传 Artifact、不更新 Release。
-- 勾选 `publish_release` 时覆盖发布到固定的 `latest` tag。
+- 勾选 `publish_release` 时发布到带日期的 tag `h5000m-YYYYMMDD-<运行号>`，并标为 Latest；附带 `SHA256SUMS`（下载后 `sha256sum -c SHA256SUMS --ignore-missing` 校验）。
+- 只保留最近 `RELEASE_KEEP`（默认 5）个 `h5000m-*` Release，更早的连同 tag 自动删除，方便回退到前几版；旧的固定 `latest` Release 不会被自动删，需要的话手动删。
+- 手动触发页面的选项按【网络加速】【基础】【5G 模组】【DNS 过滤】【代理】【发布与测试】【运行环境】分组排序。
 - 可选 `run_config_coverage`（`quick` / `full`）先跑覆盖性配置测试，与编译并行，不阻塞发布。
 - feeds 更新失败直接中止，避免产出缺包固件。
 - 免费额度不够时可选 `runner_type=self-hosted`，见下文。
@@ -257,7 +261,6 @@ PROFILE_SET=full bash scripts/coverage-test.sh
 | **改 Wi-Fi 不要用无参数 `wifi`** | 两个频段整体重启时切换加密方式，曾导致驱动卡死、全网断网，只能断电恢复。请在 LuCI 里改，或 `uci commit wireless; wifi reload`（只重载改动的射频） |
 | Apple Mac 收不到 WMM UP 2 帧 | DSCP 16–23（CS2 / AF21–23）发往 Mac 的帧全部丢失；dropbear 的 SSH 用 AF21，所以 Mac 直连路由器 SSH 会超时。原因在闭源驱动内，未解决。规避：经有线主机跳板，或在路由器上把发往 Wi-Fi 的 DSCP 16–23 改写为 0 |
 | **MediaTek HNAT 让 Wi-Fi 连接中途卡死** | 部分下行硬件转发条目写错，表现为"首次打开慢 / 失败，刷新就好"。默认 `ENABLE_HNAT=false`，详见 [HNAT 已知问题](#hnat--wed-已知问题连接中途卡死) |
-| `h5000m.extra.config` 里的死锁自动重启配置无效 | `CONFIG_KERNEL_*_PANIC=y`、`CONFIG_CMDLINE="panic=10"` 在 OpenWrt 的配置系统里不存在，`make defconfig` 会静默丢弃；实际只编进了软 / 硬死锁和 hung task **检测器**，不会自动重启（panic 后的重启由 `kernel.panic=3` 负责）。需要的话应改为运行时 sysctl |
 | 闭源驱动 | 驱动与芯片固件随上游 padavanonly 更新；Wi-Fi 相关问题只能等上游或换开源 mt76（主线 OpenWrt 已支持 H5000M，但目前有 Wi-Fi NAT 吞吐偏低的报告） |
 | 默认 UPnP 开启 | WAN 有公网 IP 时注意；不需要可用 `ENABLE_UPNP=false` |
 
